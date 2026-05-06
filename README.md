@@ -18,6 +18,7 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 | `reassign_gt_chimeric.py`   | χ-aware GT correction before phasing |
 | `estimate_chi_pooled.py`    | pooled-continuous χ_R estimator |
 | `iterative_remap_em.py`     | EM refinement (Salmon-style read remap) |
+| `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
 | `gene.spechla.bed`          | per-gene typing region on `hla.ref.extend.fa` |
 | `environment.yml`           | conda environment spec |
 | `octopus_to_imgt.py`, `caller_free_4hap.py` | rejected alternatives, kept for reference |
@@ -49,11 +50,23 @@ RECIPIENT_MAJOR=0 \
 bash scripts/polyphase_v2.sh
 ```
 
-Inspect final per-gene calls:
+**Final result — one file, all 6 genes:**
 
 ```bash
-column -t asm_v2/mySample/hla-a/HLA-A/calls.tsv
+column -t asm_v2/mySample/mySample.final_calls.tsv
 ```
+
+Example:
+
+```
+sample      gene      R1            R2            D1            D2            source
+mySample    HLA-A     A*01:01:01:01 A*23:01:01:01 A*01:01:01:01 A*29:02:01:02 em-refined
+mySample    HLA-B     B*08:01:01:01 B*44:03:01:01 B*08:01:01:01 B*45:01:01:01 em-refined
+...
+```
+
+The per-gene FASTAs (`hap{1..4}.fa`) and raw `calls.tsv` are still kept under
+`asm_v2/<SAMPLE>/<gene_lc>/<HLA-X>/` for inspection.
 
 ---
 
@@ -99,19 +112,25 @@ See [../PIPELINE.md](../PIPELINE.md) §6.1 for the parameter selection guide.
 ## 6. Outputs
 
 ```
-spechla_out/<SAMPLE>/
-    <SAMPLE>.merge.bam, .freebayes.vcf.gz, .pooled_continuous.vcf.gz, ...
-    <SAMPLE>.chimerism.txt          # χ from AD-cluster estimator
-    <SAMPLE>.chi_pooled.txt         # χ from pooled-continuous (per gene)
-    em_refine/<gene>.{calls,summary,iterative}.tsv
+asm_v2/<SAMPLE>/
+    <SAMPLE>.final_calls.tsv          ★ FINAL aggregated result (one row per gene)
+    <gene_lc>/<HLA-X>/
+        calls.tsv                     per-gene final 4-hap call (R/D-tagged)
+        calls.baseline.tsv            baseline before EM refinement (if overridden)
+        hap{1..4}.fa                  per-haplotype masked FASTA
 
-asm_v2/<SAMPLE>/<gene_lc>/<HLA-X>/
-    calls.tsv               # FINAL — 4 haplotypes (R/D-tagged)
-    calls.baseline.tsv      # original baseline (if EM refinement overrode)
-    hap{1..4}.fa            # masked consensus per haplotype
+spechla_out/<SAMPLE>/                 intermediate alignments + variants
+    <SAMPLE>.merge.bam, .freebayes.vcf.gz, .pooled_continuous.vcf.gz, ...
+    <SAMPLE>.chimerism.txt            χ from AD-cluster estimator
+    <SAMPLE>.chi_pooled.txt           χ from pooled-continuous (per gene)
+    em_refine/<gene>.{calls,summary,iterative}.tsv
 ```
 
-`calls.tsv` columns: `global_hap | assignment(R/D) | allele | em_weight`.
+* `<SAMPLE>.final_calls.tsv` columns:
+  `sample | gene | R1 | R2 | D1 | D2 | source` (`source` ∈ {`em-refined`,
+  `baseline`, `missing`}).
+* Per-gene `calls.tsv` columns:
+  `global_hap | assignment(R/D) | allele | em_weight`.
 
 ---
 

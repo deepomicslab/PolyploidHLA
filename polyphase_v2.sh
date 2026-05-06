@@ -446,6 +446,12 @@ for entry in "${SAMPLES_FQ[@]}"; do
     IFS='|' read -r S F1 F2 <<<"$entry"
     run_one_sample "$S" "$F1" "$F2"
     run_em_refine "$S"
+
+    # ---- 8. aggregate per-gene calls.tsv into one final summary ----
+    FINAL="${ASM_ROOT}/${S}/${S}.final_calls.tsv"
+    "$PYBIN" "${SCRIPTS_DIR}/aggregate_calls.py" \
+        --asm-root "$ASM_ROOT" --sample "$S" --out "$FINAL" \
+        && echo "[FINAL] ${S}: ${FINAL}"
 done
 
 echo "[INFO] All samples processed."
