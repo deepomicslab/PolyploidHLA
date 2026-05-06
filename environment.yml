@@ -1,0 +1,24 @@
+name: polyploid-hla
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # --- Python core ---
+  - python=3.10
+  - numpy>=1.24,<2.0
+  - tqdm>=4.65
+
+  # --- Phasing / variant tooling ---
+  - whatshap>=2.2,<3.0          # polyphase requires >=1.4; pinned >=2.2 for stability
+  - pysam>=0.22,<0.23
+  - parasail-python>=1.3.4
+  - mappy>=2.26
+
+  # --- External binaries (must be on PATH) ---
+  - bowtie2=2.5.*
+  - bwa=0.7.*
+  - samtools=1.19.*
+  - bcftools=1.19.*
+  - freebayes=1.3.*             # 1.0 lacks --pooled-continuous semantics we rely on
+  - htslib=1.19.*               # tabix/bgzip
