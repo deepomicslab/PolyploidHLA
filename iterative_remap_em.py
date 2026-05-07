@@ -20,10 +20,18 @@ import argparse, os, sys, subprocess, tempfile, time, math, itertools
 from collections import defaultdict
 import numpy as np
 
-IMGT = "/data6/wangxuedong/polyploid_hla/SpecHLA/db/ref/hla_gen.format.filter.extend.DRB.no26789.v2.fasta"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_SPECHLA = os.environ.get(
+    "SPECHLA",
+    os.path.abspath(os.path.join(SCRIPT_DIR, "..", "SpecHLA")),
+)
+DEFAULT_IMGT = os.environ.get(
+    "IMGT_HLA_FASTA",
+    os.path.join(DEFAULT_SPECHLA, "db", "ref", "hla_gen.format.filter.extend.DRB.no26789.v2.fasta"),
+)
 
 
-def load_imgt(path=IMGT):
+def load_imgt(path=DEFAULT_IMGT):
     out, n, p = {}, None, []
     for line in open(path):
         line = line.rstrip()
@@ -215,6 +223,8 @@ def main():
     ap.add_argument("--chi-r", type=float, required=True)
     ap.add_argument("--gene", action="append", required=True)
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--imgt", default=DEFAULT_IMGT,
+                    help="IMGT/HLA FASTA used by SpecHLA")
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--min-as-frac", type=float, default=0.95,
                     help="keep alignments with AS >= frac*best_AS")
@@ -239,8 +249,8 @@ def main():
                     "(only used with --per-gene-chi)")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    print("loading IMGT db ...", flush=True)
-    db = load_imgt()
+    print(f"loading IMGT db: {args.imgt}", flush=True)
+    db = load_imgt(args.imgt)
     print(f"  {len(db)} alleles", flush=True)
     summary = []
     for g in args.gene:

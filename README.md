@@ -19,6 +19,7 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 | `estimate_chi_pooled.py`    | pooled-continuous χ_R estimator |
 | `iterative_remap_em.py`     | EM refinement (Salmon-style read remap) |
 | `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
+| `evaluate_calls.py`         | compares `<SAMPLE>.final_calls.tsv` with `truth_typing.tsv` at exact/3-field/2-field resolution |
 | `gene.spechla.bed`          | per-gene typing region on `hla.ref.extend.fa` |
 | `environment.yml`           | conda environment spec |
 | `octopus_to_imgt.py`, `caller_free_4hap.py` | rejected alternatives, kept for reference |
@@ -64,6 +65,15 @@ mySample    HLA-A     A*01:01:01:01 A*23:01:01:01 A*01:01:01:01 A*29:02:01:02 em
 mySample    HLA-B     B*08:01:01:01 B*44:03:01:01 B*08:01:01:01 B*45:01:01:01 em-refined
 ...
 ```
+
+The file keeps both high-resolution calls and conservative report calls:
+
+* `*_full`: full allele chosen by the pipeline.
+* `*_2field`: allele collapsed to 2-field, useful when truth is G group / low resolution.
+* `*_report`: equals `*_full` by default; automatically downgraded to 2-field
+  when a gene has high masked sequence fraction.
+* `mean_mask_fraction`, `report_level`, `warning`: explain why a gene was
+  reported at full vs. 2-field resolution.
 
 The per-gene FASTAs (`hap{1..4}.fa`) and raw `calls.tsv` are still kept under
 `asm_v2/<SAMPLE>/<gene_lc>/<HLA-X>/` for inspection.
@@ -127,10 +137,18 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
 ```
 
 * `<SAMPLE>.final_calls.tsv` columns:
-  `sample | gene | R1 | R2 | D1 | D2 | source` (`source` ∈ {`em-refined`,
-  `baseline`, `missing`}).
+  `sample | gene | R1_full | R2_full | D1_full | D2_full | R1_2field | ... |
+  R1_report | ... | source | mean_mask_fraction | report_level | warning`.
 * Per-gene `calls.tsv` columns:
   `global_hap | assignment(R/D) | allele | em_weight`.
+
+If truth is available, evaluate with:
+
+```bash
+python scripts/evaluate_calls.py \
+  --truth truth/truth_typing.tsv \
+  --calls asm_v2/mySample/mySample.final_calls.tsv
+```
 
 ---
 

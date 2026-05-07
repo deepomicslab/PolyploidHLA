@@ -406,6 +406,7 @@ run_em_refine () {
         --sample "$SPEC" \
         --fq-dir "$OUT" \
         --chi-r "$CHI_R" \
+        --imgt "$DB_PREFIX" \
         --out-dir "$EM_OUT" \
         --threads "$THREADS" \
         ${EM_REFINE_PER_GENE_CHI:+--per-gene-chi} \
