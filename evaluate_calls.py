@@ -6,32 +6,100 @@ Truth format matches this project:
     DONOR       ...
     PATIENT     ...
 
-Outputs per-resolution overlap counts for PATIENT(R) and DONOR(D) calls.
+Outputs 2-field and G group overlap counts for PATIENT(R) and DONOR(D) calls.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import os
 from collections import Counter, defaultdict
 from pathlib import Path
 
 
-def norm_allele(allele: str, level: str) -> str:
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_SPECHLA = Path(os.environ.get("SPECHLA", SCRIPT_DIR.parent / "SpecHLA"))
+DEFAULT_G_GROUP = DEFAULT_SPECHLA / "db" / "HLA" / "hla_nom_g.txt"
+
+
+def load_g_group(path: Path):
+    gmap = {}
+    if not path.exists():
+        return gmap
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(";")
+            if len(parts) < 3:
+                continue
+            gene = parts[0].rstrip("*")
+            members = parts[-2].split("/") if parts[-2] else []
+            group = parts[-1] or parts[-2]
+            if not group:
+                continue
+            group_name = f"{gene}*{group}"
+            for member in members:
+                gmap[f"{gene}*{member}"] = group_name
+            gmap[group_name] = group_name
+    return gmap
+
+
+def strip_expr_suffix(field: str) -> str:
+    return field[:-1] if field and field[-1].isalpha() and field[-1] != "G" else field
+
+
+def clean_allele(allele: str) -> str:
     if not allele or allele == "NA":
         return "NA"
     allele = allele.replace("HLA-", "")
     if "*" not in allele:
         return allele
     gene, rest = allele.split("*", 1)
-    rest = rest.replace("G", "").replace("N", "")
     fields = rest.split(":")
-    if level == "exact_noG":
-        return f"{gene}*{':'.join(fields)}"
-    if level == "3field":
-        return f"{gene}*{':'.join(fields[:3])}"
+    fields[-1] = strip_expr_suffix(fields[-1])
+    return f"{gene}*{':'.join(fields)}"
+
+
+def norm_allele(allele: str, level: str, gmap=None) -> str:
+    allele = clean_allele(allele)
+    if allele == "NA" or "*" not in allele:
+        return allele
+    gene, rest = allele.split("*", 1)
+    if level == "g_group":
+        if allele.endswith("G"):
+            return allele
+        candidates = [allele]
+        fields = rest.split(":")
+        if len(fields) == 2:
+            candidates.extend([f"{gene}*{rest}:01", f"{gene}*{rest}:01:01"])
+        elif len(fields) == 3:
+            candidates.append(f"{gene}*{rest}:01")
+        for candidate in candidates:
+            if gmap and candidate in gmap:
+                return gmap[candidate]
+        return allele
+    rest = rest.replace("G", "")
+    fields = rest.split(":")
     if level == "2field":
         return f"{gene}*{':'.join(fields[:2])}"
     raise ValueError(level)
+
+
+def field_count(allele: str) -> int:
+    allele = clean_allele(allele)
+    if "*" not in allele:
+        return 0
+    return len(allele.split("*", 1)[1].replace("G", "").split(":"))
+
+
+def g_group_truth_target(allele: str, gmap):
+    allele = clean_allele(allele)
+    as_group = norm_allele(allele, "g_group", gmap)
+    if allele.endswith("G") or as_group != allele or field_count(allele) >= 3:
+        return "g_group", as_group
+    return "2field", norm_allele(allele, "2field", gmap)
 
 
 def load_truth(path: Path):
@@ -73,18 +141,42 @@ def overlap(truth_vals, pred_vals):
     return hits
 
 
+def overlap_g_group_truth_resolution(truth_vals, pred_vals, gmap):
+    truth_targets = [g_group_truth_target(x, gmap) for x in truth_vals]
+    pred_by_level = {
+        "2field": Counter(norm_allele(x, "2field", gmap) for x in pred_vals),
+        "g_group": Counter(norm_allele(x, "g_group", gmap) for x in pred_vals),
+    }
+    hits = 0
+    for target_level, target_value in truth_targets:
+        if pred_by_level[target_level][target_value] > 0:
+            hits += 1
+            pred_by_level[target_level][target_value] -= 1
+    return hits
+
+
+def normalize_for_display(vals, level, gmap):
+    if level == "g_group":
+        return sorted(value for _, value in (g_group_truth_target(x, gmap) for x in vals))
+    return sorted(norm_allele(x, level, gmap) for x in vals)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--truth", required=True, type=Path)
     ap.add_argument("--calls", required=True, type=Path)
-    ap.add_argument("--call-set", choices=("report", "full", "2field"), default="report",
+    ap.add_argument("--call-set", choices=("report", "full", "2field", "g_group"), default="report",
                     help="which final_calls columns to evaluate")
+    ap.add_argument("--g-group", type=Path, default=DEFAULT_G_GROUP,
+                    help="WMDA hla_nom_g.txt used for G group conversion")
     args = ap.parse_args()
 
     truth = load_truth(args.truth)
     calls = load_calls(args.calls, args.call_set)
+    gmap = load_g_group(args.g_group)
     print(f"call_set\t{args.call_set}")
-    for level in ("exact_noG", "3field", "2field"):
+    print(f"g_group_file\t{args.g_group}")
+    for level in ("2field", "g_group"):
         total = 0
         ok = 0
         mismatches = []
@@ -93,9 +185,14 @@ def main():
                 pred_vals = calls[side].get(gene, [])
                 if not pred_vals:
                     continue
-                t = sorted(norm_allele(x, level) for x in truth_vals)
-                p = sorted(norm_allele(x, level) for x in pred_vals)
-                h = overlap(t, p)
+                if level == "g_group":
+                    t = normalize_for_display(truth_vals, level, gmap)
+                    p = sorted(norm_allele(x, level, gmap) for x in pred_vals)
+                    h = overlap_g_group_truth_resolution(truth_vals, pred_vals, gmap)
+                else:
+                    t = normalize_for_display(truth_vals, level, gmap)
+                    p = sorted(norm_allele(x, level, gmap) for x in pred_vals)
+                    h = overlap(t, p)
                 ok += h
                 total += len(t)
                 if h != len(t):

@@ -19,7 +19,8 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 | `estimate_chi_pooled.py`    | pooled-continuous χ_R estimator |
 | `iterative_remap_em.py`     | EM refinement (Salmon-style read remap) |
 | `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
-| `evaluate_calls.py`         | compares `<SAMPLE>.final_calls.tsv` with `truth_typing.tsv` at exact/3-field/2-field resolution |
+| `evaluate_calls.py`         | compares `<SAMPLE>.final_calls.tsv` with `truth_typing.tsv` at 2-field and G group resolution |
+| `exon_typing_from_haps.py`  | exon-level G group fallback/diagnostic for high-mask genes |
 | `gene.spechla.bed`          | per-gene typing region on `hla.ref.extend.fa` |
 | `environment.yml`           | conda environment spec |
 | `octopus_to_imgt.py`, `caller_free_4hap.py` | rejected alternatives, kept for reference |
@@ -69,7 +70,8 @@ mySample    HLA-B     B*08:01:01:01 B*44:03:01:01 B*08:01:01:01 B*45:01:01:01 em
 The file keeps both high-resolution calls and conservative report calls:
 
 * `*_full`: full allele chosen by the pipeline.
-* `*_2field`: allele collapsed to 2-field, useful when truth is G group / low resolution.
+* `*_2field`: allele collapsed to 2-field, useful when truth is low resolution.
+* `*_g_group`: allele converted through SpecHLA `hla_nom_g.txt`.
 * `*_report`: equals `*_full` by default; automatically downgraded to 2-field
   when a gene has high masked sequence fraction.
 * `mean_mask_fraction`, `report_level`, `warning`: explain why a gene was
@@ -98,6 +100,8 @@ Optional environment / database overrides:
 | `WORK_DIR` | `<repo>` (parent of scripts/) | base for output dirs |
 | `OUT_ROOT` | `${WORK_DIR}/spechla_out`  | per-sample alignments + VCFs |
 | `ASM_ROOT` | `${WORK_DIR}/asm_v2`       | typing outputs |
+| `EXON_TYPING` | `1` | also write exon-level fallback diagnostics (`<SAMPLE>.exon_calls.tsv`) |
+| `EM_REFINE_PER_GENE_CHI` | `0` | experimental; fixed pooled/global χ is default because it performs better on 267016 |
 
 Full env-var list is in [../PIPELINE.md](../PIPELINE.md) §6.
 
@@ -124,6 +128,7 @@ See [../PIPELINE.md](../PIPELINE.md) §6.1 for the parameter selection guide.
 ```
 asm_v2/<SAMPLE>/
     <SAMPLE>.final_calls.tsv          ★ FINAL aggregated result (one row per gene)
+    <SAMPLE>.exon_calls.tsv           exon-level G group diagnostic for high-mask genes
     <gene_lc>/<HLA-X>/
         calls.tsv                     per-gene final 4-hap call (R/D-tagged)
         calls.baseline.tsv            baseline before EM refinement (if overridden)
@@ -138,7 +143,7 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
 
 * `<SAMPLE>.final_calls.tsv` columns:
   `sample | gene | R1_full | R2_full | D1_full | D2_full | R1_2field | ... |
-  R1_report | ... | source | mean_mask_fraction | report_level | warning`.
+  R1_g_group | ... | R1_report | ... | source | mean_mask_fraction | report_level | warning`.
 * Per-gene `calls.tsv` columns:
   `global_hap | assignment(R/D) | allele | em_weight`.
 
@@ -149,6 +154,12 @@ python scripts/evaluate_calls.py \
   --truth truth/truth_typing.tsv \
   --calls asm_v2/mySample/mySample.final_calls.tsv
 ```
+
+Evaluation reports only `2field` and `g_group` accuracy. It intentionally does
+not score 3-field because many truth entries are 2-field or G group resolution.
+For G group scoring, truth alleles that cannot be uniquely mapped through
+`hla_nom_g.txt` remain at 2-field resolution instead of being treated as
+false mismatches.
 
 ---
 

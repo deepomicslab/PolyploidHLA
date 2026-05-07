@@ -70,16 +70,20 @@ MASK_MIN_DEPTH=${MASK_MIN_DEPTH:-5}
 EM_REFINE=${EM_REFINE:-1}
 EM_REFINE_MAX_DIFF=${EM_REFINE_MAX_DIFF:-0.7}  # accept EM only if sumAbsDiff < this
 EM_REFINE_GENES=${EM_REFINE_GENES:-"HLA-A HLA-B HLA-C HLA-DRB1 HLA-DPB1 HLA-DQB1"}
-# Per-gene chi_R re-fitting (Salmon-like): allows chi to vary per locus within
-# the soft L1 prior |chi_local-chi_global|*EM_REFINE_CHI_PRIOR. Recovers
-# recipient-unique alleles when chi_global is small or per-locus dropout is
-# uneven. Validated to take 267016 from 19/24 -> 20/24 with no regression on
-# 267015 (24/24).
-EM_REFINE_PER_GENE_CHI=${EM_REFINE_PER_GENE_CHI:-1}
+# Per-gene chi_R re-fitting (Salmon-like) is experimental. In 267016, fixed
+# pooled/global chi_R recovers more recipient-minor alleles (21/24) than
+# unconstrained per-gene chi (19/24), so keep it off by default.
+EM_REFINE_PER_GENE_CHI=${EM_REFINE_PER_GENE_CHI:-0}
 EM_REFINE_CHI_PRIOR=${EM_REFINE_CHI_PRIOR:-0.05}
 EM_REFINE_TOP_N=${EM_REFINE_TOP_N:-25}
 EM_REFINE_MIN_FRAC=${EM_REFINE_MIN_FRAC:-0.001}
 EM_REFINE_PY=${EM_REFINE_PY:-${SCRIPTS_DIR}/iterative_remap_em.py}
+
+# Optional exon-level G group fallback/diagnostic for high-mask genes. This
+# writes <SAMPLE>.exon_calls.tsv but does not override final calls.
+EXON_TYPING=${EXON_TYPING:-1}
+EXON_TYPING_GENES=${EXON_TYPING_GENES:-"HLA-DRB1 HLA-DPB1 HLA-DQB1"}
+EXON_TYPING_PY=${EXON_TYPING_PY:-${SCRIPTS_DIR}/exon_typing_from_haps.py}
 
 # chimerism prior: 0 = donor major (allo-HSCT recipient blood, default).
 # Set to 1 for solid-organ tx etc.
@@ -401,6 +405,10 @@ run_em_refine () {
     mkdir -p "$EM_OUT"
     local GENE_ARGS=()
     for gx in $EM_REFINE_GENES; do GENE_ARGS+=(--gene "$gx"); done
+    local CHI_ARGS=()
+    if [[ "$EM_REFINE_PER_GENE_CHI" == "1" ]]; then
+        CHI_ARGS+=(--per-gene-chi --chi-prior "$EM_REFINE_CHI_PRIOR")
+    fi
     echo "[step] EM iterative remap (chi_R=$CHI_R, max-diff=$EM_REFINE_MAX_DIFF)"
     "$PYBIN" -u "$EM_REFINE_PY" \
         --sample "$SPEC" \
@@ -409,8 +417,7 @@ run_em_refine () {
         --imgt "$DB_PREFIX" \
         --out-dir "$EM_OUT" \
         --threads "$THREADS" \
-        ${EM_REFINE_PER_GENE_CHI:+--per-gene-chi} \
-        ${EM_REFINE_CHI_PRIOR:+--chi-prior "$EM_REFINE_CHI_PRIOR"} \
+        "${CHI_ARGS[@]}" \
         ${EM_REFINE_TOP_N:+--top-n "$EM_REFINE_TOP_N"} \
         ${EM_REFINE_MIN_FRAC:+--min-frac "$EM_REFINE_MIN_FRAC"} \
         "${GENE_ARGS[@]}" 2>&1 | tee "${EM_OUT}/em_refine.log" || {
@@ -448,10 +455,26 @@ for entry in "${SAMPLES_FQ[@]}"; do
     run_one_sample "$S" "$F1" "$F2"
     run_em_refine "$S"
 
+    if [[ "$EXON_TYPING" == "1" ]]; then
+        if command -v blastn >/dev/null 2>&1; then
+            EXON_OUT="${ASM_ROOT}/${S}/${S}.exon_calls.tsv"
+            EXON_ARGS=(--genes)
+            for gx in $EXON_TYPING_GENES; do EXON_ARGS+=("$gx"); done
+            "$PYBIN" "${EXON_TYPING_PY}" \
+                --asm-root "$ASM_ROOT" --sample "$S" --out "$EXON_OUT" \
+                --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
+                "${EXON_ARGS[@]}" \
+                || echo "[exon-typing] failed; continuing with primary calls"
+        else
+            echo "[exon-typing] blastn not found; skip exon fallback diagnostics"
+        fi
+    fi
+
     # ---- 8. aggregate per-gene calls.tsv into one final summary ----
     FINAL="${ASM_ROOT}/${S}/${S}.final_calls.tsv"
     "$PYBIN" "${SCRIPTS_DIR}/aggregate_calls.py" \
         --asm-root "$ASM_ROOT" --sample "$S" --out "$FINAL" \
+        --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
         && echo "[FINAL] ${S}: ${FINAL}"
 done
 

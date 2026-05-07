@@ -15,7 +15,8 @@ conda activate polyploid-hla
 
 This installs python + the variant-calling toolchain (whatshap, pysam,
 parasail, mappy, numpy, bowtie2, bwa, samtools, bcftools, freebayes, tabix)
-with version pins matching what the pipeline was validated on.
+plus `blastn` for optional exon-level G group fallback diagnostics, with
+version pins matching what the pipeline was validated on.
 
 If you cannot use conda, install the same set manually and ensure all
 binaries are on `PATH`. The driver auto-discovers `python` and `whatshap`

@@ -3,10 +3,10 @@
 
 Reads <ASM_ROOT>/<SAMPLE>/<gene_lc>/<TAG>/calls.tsv for each gene and writes
 a single tab-separated file. The full allele calls are preserved, and extra
-2-field / report columns are emitted for low-resolution truth comparison and
-low-coverage genes.
+2-field, G group, and report columns are emitted for low-resolution / G group
+truth comparison and low-coverage genes.
 
-    sample  gene  R1_full  R2_full  D1_full  D2_full  R1_2field ...
+    sample  gene  R1_full  R2_full  D1_full  D2_full  R1_2field  R1_g_group ...
 
 `source` is `em-refined` if a `calls.baseline.tsv` sibling exists (meaning the
 EM stage overrode the baseline), otherwise `baseline`.
@@ -21,19 +21,80 @@ Defaults to the 6 typed genes and writes
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Optional
 
 DEFAULT_GENES = ["HLA-A", "HLA-B", "HLA-C", "HLA-DRB1", "HLA-DPB1", "HLA-DQB1"]
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_SPECHLA = Path(os.environ.get("SPECHLA", SCRIPT_DIR.parent / "SpecHLA"))
+DEFAULT_G_GROUP = DEFAULT_SPECHLA / "db" / "HLA" / "hla_nom_g.txt"
 
 
-def allele_2field(allele: str) -> str:
+def load_g_group(path: Path):
+    gmap = {}
+    if not path.exists():
+        return gmap
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(";")
+            if len(parts) < 3:
+                continue
+            gene = parts[0].rstrip("*")
+            members = parts[-2].split("/") if parts[-2] else []
+            group = parts[-1] or parts[-2]
+            if not group:
+                continue
+            group_name = f"{gene}*{group}"
+            for member in members:
+                gmap[f"{gene}*{member}"] = group_name
+            gmap[group_name] = group_name
+    return gmap
+
+
+def strip_expr_suffix(field: str) -> str:
+    return field[:-1] if field and field[-1].isalpha() and field[-1] != "G" else field
+
+
+def clean_allele(allele: str) -> str:
     if not allele or allele == "NA" or "*" not in allele:
         return allele or "NA"
     gene, fields = allele.replace("HLA-", "").split("*", 1)
-    parts = fields.replace("G", "").replace("N", "").split(":")
+    parts = fields.split(":")
+    parts[-1] = strip_expr_suffix(parts[-1])
+    return f"{gene}*{':'.join(parts)}"
+
+
+def allele_2field(allele: str) -> str:
+    allele = clean_allele(allele)
+    if allele == "NA" or "*" not in allele:
+        return allele
+    gene, fields = allele.split("*", 1)
+    parts = fields.replace("G", "").split(":")
     return f"{gene}*{':'.join(parts[:2])}" if len(parts) >= 2 else f"{gene}*{parts[0]}"
+
+
+def allele_g_group(allele: str, gmap) -> str:
+    allele = clean_allele(allele)
+    if allele == "NA" or "*" not in allele:
+        return allele
+    if allele.endswith("G"):
+        return allele
+    gene, rest = allele.split("*", 1)
+    candidates = [allele]
+    fields = rest.split(":")
+    if len(fields) == 2:
+        candidates.extend([f"{gene}*{rest}:01", f"{gene}*{rest}:01:01"])
+    elif len(fields) == 3:
+        candidates.append(f"{gene}*{rest}:01")
+    for candidate in candidates:
+        if candidate in gmap:
+            return gmap[candidate]
+    return allele
 
 
 def fasta_n_fraction(path: Path) -> Optional[float]:
@@ -69,7 +130,7 @@ def read_calls(path: Path):
     return rows
 
 
-def collect(asm_root: Path, sample: str, genes, mask_warn: float):
+def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap):
     out_rows = []
     for gene in genes:
         gene_lc = gene.lower()
@@ -100,6 +161,8 @@ def collect(asm_root: Path, sample: str, genes, mask_warn: float):
             "R1_full": rs[0], "R2_full": rs[1], "D1_full": ds[0], "D2_full": ds[1],
             "R1_2field": allele_2field(rs[0]), "R2_2field": allele_2field(rs[1]),
             "D1_2field": allele_2field(ds[0]), "D2_2field": allele_2field(ds[1]),
+            "R1_g_group": allele_g_group(rs[0], gmap), "R2_g_group": allele_g_group(rs[1], gmap),
+            "D1_g_group": allele_g_group(ds[0], gmap), "D2_g_group": allele_g_group(ds[1], gmap),
             "R1_report": allele_2field(rs[0]) if high_mask else rs[0],
             "R2_report": allele_2field(rs[1]) if high_mask else rs[1],
             "D1_report": allele_2field(ds[0]) if high_mask else ds[0],
@@ -121,14 +184,18 @@ def main():
     ap.add_argument("--mask-warn", type=float, default=0.15,
                     help="mean hap FASTA N fraction above which report columns "
                     "are downgraded to 2-field")
+    ap.add_argument("--g-group", type=Path, default=DEFAULT_G_GROUP,
+                    help="WMDA hla_nom_g.txt used for G group conversion")
     args = ap.parse_args()
 
-    rows = collect(args.asm_root, args.sample, args.genes, args.mask_warn)
+    gmap = load_g_group(args.g_group)
+    rows = collect(args.asm_root, args.sample, args.genes, args.mask_warn, gmap)
     out_path = args.out or (args.asm_root / args.sample / f"{args.sample}.final_calls.tsv")
     cols = [
         "sample", "gene",
         "R1_full", "R2_full", "D1_full", "D2_full",
         "R1_2field", "R2_2field", "D1_2field", "D2_2field",
+        "R1_g_group", "R2_g_group", "D1_g_group", "D2_g_group",
         "R1_report", "R2_report", "D1_report", "D2_report",
         "source", "mean_mask_fraction", "report_level", "warning",
     ]
