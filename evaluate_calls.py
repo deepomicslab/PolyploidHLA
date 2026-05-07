@@ -94,8 +94,20 @@ def field_count(allele: str) -> int:
     return len(allele.split("*", 1)[1].replace("G", "").split(":"))
 
 
+def g_groups_matching_prefix(allele: str, gmap):
+    allele = clean_allele(allele)
+    if not gmap or "*" not in allele:
+        return set()
+    prefix = allele + ":"
+    return {group for member, group in gmap.items() if not member.endswith("G") and member.startswith(prefix)}
+
+
 def g_group_truth_target(allele: str, gmap):
     allele = clean_allele(allele)
+    if field_count(allele) == 2:
+        groups = g_groups_matching_prefix(allele, gmap)
+        if len(groups) != 1:
+            return "2field", norm_allele(allele, "2field", gmap)
     as_group = norm_allele(allele, "g_group", gmap)
     if allele.endswith("G") or as_group != allele or field_count(allele) >= 3:
         return "g_group", as_group
@@ -113,7 +125,10 @@ def load_truth(path: Path):
         side = row[0]
         for gene_short, allele in zip(header, row[1:]):
             gene = f"HLA-{gene_short}"
-            truth[side][gene].append(f"{gene_short}*{allele}")
+            if "*" in allele:
+                truth[side][gene].append(allele.replace("HLA-", ""))
+            else:
+                truth[side][gene].append(f"{gene_short}*{allele}")
     return truth
 
 

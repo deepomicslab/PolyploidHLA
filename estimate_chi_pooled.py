@@ -82,6 +82,9 @@ def main():
     rows = parse_vcf(args.vcf)
     print(f"# {len(rows)} biallelic AF rows after filters", file=sys.stderr)
     res = estimate_chi_from_af([r[2] for r in rows])
+    if res is None:
+        print(f"GLOBAL  chi_R=NA  n={len(rows)}  peaks=[]")
+        return
     print(f"GLOBAL  chi_R={res['chi_r']:.4f}  n={res['n_af']}  peaks={res['all_peaks']}")
     if args.per_gene:
         per = defaultdict(list)
