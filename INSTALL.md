@@ -15,8 +15,9 @@ conda activate polyploid-hla
 
 This installs python + the variant-calling toolchain (whatshap, pysam,
 parasail, mappy, numpy, bowtie2, bwa, samtools, bcftools, freebayes, tabix)
-plus `blastn` for optional exon-level G group fallback diagnostics, with
-version pins matching what the pipeline was validated on.
+plus `blastn` for optional exon-level G group fallback diagnostics. The
+`samtools` package is also used for `wgsim`, which powers the benchmark read
+simulation scripts. Version pins match what the pipeline was validated on.
 
 If you cannot use conda, install the same set manually and ensure all
 binaries are on `PATH`. The driver auto-discovers `python` and `whatshap`
@@ -61,7 +62,7 @@ Verify the environment is correctly resolved without running on real data:
 ```bash
 conda activate polyploid-hla
 bash -n scripts/polyphase_v2.sh                                # syntax check
-for t in python whatshap bowtie2 bwa samtools bcftools freebayes tabix; do
+for t in python whatshap bowtie2 bwa samtools wgsim bcftools freebayes tabix; do
     command -v "$t" >/dev/null && echo "OK   $t" || echo "MISS $t"
 done
 python -c "import pysam, parasail, mappy, numpy, tqdm; print('python deps OK')"
