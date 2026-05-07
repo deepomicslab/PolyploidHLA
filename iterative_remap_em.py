@@ -216,6 +216,48 @@ def fit_4hap(counts, chi_r, top_n=14, min_frac=0.005,
     return best
 
 
+def has_expression_suffix(two_field_name):
+    return bool(two_field_name and two_field_name[-1].isalpha() and two_field_name[-1] != "G")
+
+
+def rescue_recipient_minor(counts, winners, chi_r, min_frac=0.001,
+                           min_count=20.0, max_frac=0.08):
+    """Recover recipient-minor alleles suppressed by donor-major fitting.
+
+    In donor-major mixtures, the L1 dose fit can prefer a symmetric donor-like
+    quartet because the recipient-only allele is underweighted by multi-mapping
+    EM. If the fitted recipient pair contains no allele absent from the donor
+    pair, but a credible low-frequency non-donor allele exists, report it as the
+    second recipient haplotype while keeping the donor major pair unchanged.
+    """
+    if not winners or chi_r <= 0 or chi_r >= 0.45:
+        return winners, None
+    total = sum(counts.values()) or 1.0
+    r_pair = list(winners[:2])
+    d_pair = list(winners[2:])
+    donor_set = set(d_pair)
+    if set(r_pair) - donor_set:
+        return winners, None
+    candidates = []
+    for name, count in counts.items():
+        frac = count / total
+        if name in donor_set:
+            continue
+        if has_expression_suffix(name):
+            continue
+        if count < min_count or frac < min_frac or frac > max_frac:
+            continue
+        candidates.append((name, count, frac))
+    if not candidates:
+        return winners, None
+    candidates.sort(key=lambda x: (-x[1], x[0]))
+    minor, count, frac = candidates[0]
+    shared = max(d_pair, key=lambda n: counts.get(n, 0.0))
+    rescued = (shared, minor, d_pair[0], d_pair[1])
+    detail = f"R2={minor} weight={count:.1f} ({frac * 100:.2f}%)"
+    return rescued, detail
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sample", required=True)
@@ -247,6 +289,12 @@ def main():
     ap.add_argument("--chi-prior", type=float, default=0.5,
                     help="L1 prior penalty weight on |chi_local - chi_global| "
                     "(only used with --per-gene-chi)")
+    ap.add_argument("--recipient-minor-rescue", action="store_true",
+                    help="recover a low-frequency recipient-only allele when "
+                    "donor-major L1 fitting chooses a symmetric donor-like quartet")
+    ap.add_argument("--rescue-min-frac", type=float, default=0.001)
+    ap.add_argument("--rescue-min-count", type=float, default=20.0)
+    ap.add_argument("--rescue-max-frac", type=float, default=0.08)
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     print(f"loading IMGT db: {args.imgt}", flush=True)
@@ -322,9 +370,20 @@ def main():
         if best is None:
             print("  fit failed", flush=True); continue
         winners = list(best)  # already 2-field strings
+        rescue_detail = None
+        if args.recipient_minor_rescue:
+            rescued, rescue_detail = rescue_recipient_minor(
+                dict(tf_counts), tuple(winners), args.chi_r,
+                min_frac=args.rescue_min_frac,
+                min_count=args.rescue_min_count,
+                max_frac=args.rescue_max_frac,
+            )
+            winners = list(rescued)
         print(f"  best 4-hap (sumAbsDiff={diff:.3f}, chi_R_fit={fit_chi:.3f}):")
         print(f"    R1={winners[0]}  R2={winners[1]}  "
               f"D1={winners[2]}  D2={winners[3]}", flush=True)
+        if rescue_detail:
+            print(f"  recipient-minor rescue: {rescue_detail}", flush=True)
         with open(os.path.join(args.out_dir, f"{g}.iterative.tsv"), "w") as fh:
             fh.write("global_hap\tassignment\tallele_2field\tem_weight\n")
             for i, (nm, side) in enumerate(zip(winners, ["R","R","D","D"]), 1):

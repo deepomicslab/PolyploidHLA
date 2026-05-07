@@ -77,6 +77,10 @@ EM_REFINE_PER_GENE_CHI=${EM_REFINE_PER_GENE_CHI:-0}
 EM_REFINE_CHI_PRIOR=${EM_REFINE_CHI_PRIOR:-0.05}
 EM_REFINE_TOP_N=${EM_REFINE_TOP_N:-25}
 EM_REFINE_MIN_FRAC=${EM_REFINE_MIN_FRAC:-0.001}
+EM_REFINE_RECIPIENT_MINOR_RESCUE=${EM_REFINE_RECIPIENT_MINOR_RESCUE:-1}
+EM_REFINE_RESCUE_MIN_FRAC=${EM_REFINE_RESCUE_MIN_FRAC:-0.001}
+EM_REFINE_RESCUE_MIN_COUNT=${EM_REFINE_RESCUE_MIN_COUNT:-20}
+EM_REFINE_RESCUE_MAX_FRAC=${EM_REFINE_RESCUE_MAX_FRAC:-0.08}
 EM_REFINE_PY=${EM_REFINE_PY:-${SCRIPTS_DIR}/iterative_remap_em.py}
 
 # Optional exon-level G group fallback/diagnostic for high-mask genes. This
@@ -408,6 +412,13 @@ run_em_refine () {
     if [[ "$EM_REFINE_PER_GENE_CHI" == "1" ]]; then
         CHI_ARGS+=(--per-gene-chi --chi-prior "$EM_REFINE_CHI_PRIOR")
     fi
+    local RESCUE_ARGS=()
+    if [[ "$EM_REFINE_RECIPIENT_MINOR_RESCUE" == "1" ]]; then
+        RESCUE_ARGS+=(--recipient-minor-rescue
+            --rescue-min-frac "$EM_REFINE_RESCUE_MIN_FRAC"
+            --rescue-min-count "$EM_REFINE_RESCUE_MIN_COUNT"
+            --rescue-max-frac "$EM_REFINE_RESCUE_MAX_FRAC")
+    fi
     echo "[step] EM iterative remap (chi_R=$CHI_R, max-diff=$EM_REFINE_MAX_DIFF)"
     "$PYBIN" -u "$EM_REFINE_PY" \
         --sample "$SPEC" \
@@ -417,6 +428,7 @@ run_em_refine () {
         --out-dir "$EM_OUT" \
         --threads "$THREADS" \
         "${CHI_ARGS[@]}" \
+        "${RESCUE_ARGS[@]}" \
         ${EM_REFINE_TOP_N:+--top-n "$EM_REFINE_TOP_N"} \
         ${EM_REFINE_MIN_FRAC:+--min-frac "$EM_REFINE_MIN_FRAC"} \
         "${GENE_ARGS[@]}" 2>&1 | tee "${EM_OUT}/em_refine.log" || {

@@ -102,6 +102,7 @@ Optional environment / database overrides:
 | `ASM_ROOT` | `${WORK_DIR}/asm_v2`       | typing outputs |
 | `EXON_TYPING` | `1` | also write exon-level fallback diagnostics (`<SAMPLE>.exon_calls.tsv`) |
 | `EM_REFINE_PER_GENE_CHI` | `0` | experimental; fixed pooled/global χ is default because it performs better on 267016 |
+| `EM_REFINE_RECIPIENT_MINOR_RESCUE` | `1` | recover low-frequency recipient-only alleles when donor-major EM fitting collapses R/D to the donor-like pair |
 
 Full env-var list is in [../PIPELINE.md](../PIPELINE.md) §6.
 
