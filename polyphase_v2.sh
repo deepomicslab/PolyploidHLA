@@ -228,9 +228,8 @@ run_one_sample () {
     local CHIM_LOG="${OUT}/${SPEC}.chimerism.txt"
     if [[ ! -f "$CHIM_LOG" || $SKIP_DONE -eq 0 ]]; then
         echo "[step] estimate chimerism"
-        "$PYBIN" - "$VCF" "$RECIPIENT_MAJOR" > "$CHIM_LOG" <<'PYEOF'
+        PYTHONPATH="${SCRIPTS_DIR}:${PYTHONPATH:-}" "$PYBIN" - "$VCF" "$RECIPIENT_MAJOR" > "$CHIM_LOG" <<'PYEOF'
 import sys, pysam
-sys.path.insert(0, '/data6/wangxuedong/polyploid_hla')
 from hla_polyphase_assemble import estimate_chimerism_from_vcf
 vcf_path, recip_major = sys.argv[1], sys.argv[2] == "1"
 v = pysam.VariantFile(vcf_path)

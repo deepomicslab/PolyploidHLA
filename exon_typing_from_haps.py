@@ -21,6 +21,8 @@ DEFAULT_SPECHLA = Path(os.environ.get("SPECHLA", SCRIPT_DIR.parent / "SpecHLA"))
 DEFAULT_EXON_DB = DEFAULT_SPECHLA / "db" / "HLA" / "exon"
 DEFAULT_G_GROUP = DEFAULT_SPECHLA / "db" / "HLA" / "hla_nom_g.txt"
 DEFAULT_GENES = ["HLA-A", "HLA-B", "HLA-C", "HLA-DRB1", "HLA-DPB1", "HLA-DQB1"]
+BLASTN = os.environ.get("BLASTN", "blastn")
+MAKEBLASTDB = os.environ.get("MAKEBLASTDB", "makeblastdb")
 
 
 def load_g_group(path: Path):
@@ -108,15 +110,25 @@ def n_fraction(path: Path) -> float:
     return 1.0 if not s else s.count("N") / len(s)
 
 
-def best_exon_hit(hap_fa: Path, exon_db_prefix: Path, id_to_allele):
+def build_temp_blast_db(exon_fasta: Path, out_prefix: Path) -> bool:
+    cmd = [
+        MAKEBLASTDB, "-in", str(exon_fasta), "-dbtype", "nucl", "-out", str(out_prefix),
+        "-parse_seqids", "-blastdb_version", "4",
+    ]
+    proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    return proc.returncode == 0
+
+
+def best_exon_hit(hap_fa: Path, blast_target: Path, id_to_allele, use_db: bool):
     outfmt = "6 qseqid sseqid pident length bitscore"
     with tempfile.NamedTemporaryFile("w+t", suffix=".blast") as tmp:
-        cmd = [
-            "blastn", "-query", str(hap_fa), "-db", str(exon_db_prefix),
-            "-outfmt", outfmt, "-max_target_seqs", "20000", "-dust", "no",
-            "-out", tmp.name,
-        ]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        target_arg = "-db" if use_db else "-subject"
+        cmd = [BLASTN, "-task", "blastn", "-query", str(hap_fa), target_arg, str(blast_target),
+               "-outfmt", outfmt, "-max_target_seqs", "20000", "-dust", "no",
+               "-word_size", "7", "-out", tmp.name]
+        proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        if proc.returncode != 0:
+            return "blast_failed", 0.0, 0
         scores = {}
         with open(tmp.name) as f:
             for line in f:
@@ -158,31 +170,35 @@ def main():
     with out_path.open("w") as out:
         cols = ["sample", "gene", "global_hap", "assignment", "exon_best", "exon_g_group", "exon_2field", "n_fraction", "blast_score", "aligned_len"]
         out.write("\t".join(cols) + "\n")
-        for gene in args.genes:
-            d = args.asm_root / args.sample / gene.lower() / gene
-            exon_prefix = args.exon_db / f"{gene.replace('-', '_')}.fasta"
-            if not exon_prefix.exists():
-                continue
-            id_to_allele = parse_exon_db_headers(exon_prefix)
-            for hap in range(1, 5):
-                hap_fa = d / f"hap{hap}.fa"
-                if not hap_fa.exists():
+        with tempfile.TemporaryDirectory(prefix="polyhla_exon_blastdb_") as tmpdir:
+            for gene in args.genes:
+                d = args.asm_root / args.sample / gene.lower() / gene
+                exon_prefix = args.exon_db / f"{gene.replace('-', '_')}.fasta"
+                if not exon_prefix.exists():
                     continue
-                allele, score, aln_len = best_exon_hit(hap_fa, exon_prefix, id_to_allele)
-                assignment = "R" if hap <= 2 else "D"
-                row = {
-                    "sample": args.sample,
-                    "gene": gene,
-                    "global_hap": str(hap),
-                    "assignment": assignment,
-                    "exon_best": allele,
-                    "exon_g_group": to_g_group(allele, gmap) if allele != "no_match" else "no_match",
-                    "exon_2field": to_2field(allele) if allele != "no_match" else "no_match",
-                    "n_fraction": f"{n_fraction(hap_fa):.4f}",
-                    "blast_score": f"{score:.2f}",
-                    "aligned_len": str(aln_len),
-                }
-                out.write("\t".join(row[c] for c in cols) + "\n")
+                id_to_allele = parse_exon_db_headers(exon_prefix)
+                db_prefix = Path(tmpdir) / gene.replace("-", "_")
+                use_db = build_temp_blast_db(exon_prefix, db_prefix)
+                blast_target = db_prefix if use_db else exon_prefix
+                for hap in range(1, 5):
+                    hap_fa = d / f"hap{hap}.fa"
+                    if not hap_fa.exists():
+                        continue
+                    allele, score, aln_len = best_exon_hit(hap_fa, blast_target, id_to_allele, use_db)
+                    assignment = "R" if hap <= 2 else "D"
+                    row = {
+                        "sample": args.sample,
+                        "gene": gene,
+                        "global_hap": str(hap),
+                        "assignment": assignment,
+                        "exon_best": allele,
+                        "exon_g_group": to_g_group(allele, gmap) if "*" in allele else allele,
+                        "exon_2field": to_2field(allele) if "*" in allele else allele,
+                        "n_fraction": f"{n_fraction(hap_fa):.4f}",
+                        "blast_score": f"{score:.2f}",
+                        "aligned_len": str(aln_len),
+                    }
+                    out.write("\t".join(row[c] for c in cols) + "\n")
     print(f"[exon-typing] wrote {out_path}")
 
 
