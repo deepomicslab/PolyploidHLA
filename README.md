@@ -168,12 +168,12 @@ false mismatches.
 
 ## 7. Validation
 
-Two real samples (same patient, two time points), defaults only:
+Two real samples (same patient, two time points), current default workflow:
 
-| Sample | χ_R | Field-level accuracy (24 across 6 genes) |
-| ------ | --- | ---- |
-| 267015 (donor major, χ_R≈0.27) | 0.27 | **24/24** |
-| 267016 (deep chimerism, χ_R≈0.05) | 0.05 | **21/24** (3 R2 errors are SNR-limited) |
+| Sample | χ_R | 2-field accuracy | G group accuracy |
+| ------ | --- | --------------- | ---------------- |
+| 267015-HLA-20260415EM_S1_L001 | 0.2721 | **24/24** | **24/24** |
+| 267016-HLA-20260415EM_S3_L001 | 0.2010 | **24/24** | **24/24** |
 
 See [../PIPELINE.md](../PIPELINE.md) §7 for per-gene breakdown.
 
