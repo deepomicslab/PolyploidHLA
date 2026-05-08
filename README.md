@@ -4,7 +4,6 @@ End-to-end pipeline for **chimeric (k=4) HLA typing** of allo-HSCT and
 solid-organ transplant samples from short-read FASTQs. Outputs 4 haplotype
 sequences per gene tagged `R`(ecipient) / `D`(onor).
 
-- Algorithm reference: [../PIPELINE.md](../PIPELINE.md)
 - Installation & environment: [INSTALL.md](INSTALL.md)
 
 ---
@@ -106,7 +105,7 @@ Optional environment / database overrides:
 | `EM_REFINE_PER_GENE_CHI` | `0` | experimental; fixed pooled/global χ is default because it performs better on 267016 |
 | `EM_REFINE_RECIPIENT_MINOR_RESCUE` | `1` | recover low-frequency recipient-only alleles when donor-major EM fitting collapses R/D to the donor-like pair |
 
-Full env-var list is in [../PIPELINE.md](../PIPELINE.md) §6.
+The options above cover the recommended user-facing settings.
 
 ---
 
@@ -122,7 +121,8 @@ The pipeline auto-estimates χ from the data. Defaults work for χ_R in
 | Coverage < 50× | `MASK_MIN_DEPTH=3` |
 | Coverage > 500× | `MASK_MIN_DEPTH=10` |
 
-See [../PIPELINE.md](../PIPELINE.md) §6.1 for the parameter selection guide.
+For most samples, keep the defaults and only adjust the overrides above when
+the sample falls into one of those boundary cases.
 
 ---
 
@@ -175,7 +175,7 @@ Two real samples (same patient, two time points), current default workflow:
 | 267015-HLA-20260415EM_S1_L001 | 0.2721 | **24/24** | **24/24** |
 | 267016-HLA-20260415EM_S3_L001 | 0.2010 | **24/24** | **24/24** |
 
-See [../PIPELINE.md](../PIPELINE.md) §7 for per-gene breakdown.
+These validation numbers are based on the current default workflow.
 
 ---
 
