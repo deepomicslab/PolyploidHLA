@@ -33,9 +33,16 @@ WHATSHAP=${WHATSHAP:-$(command -v whatshap)}
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# SpecHLA install root (override with: SPECHLA=/path bash polyphase_v2.sh).
-# Default: <repo>/SpecHLA next to scripts/.
-SPECHLA=${SPECHLA:-"$(cd "${SCRIPTS_DIR}/.." && pwd)/SpecHLA"}
+# Bundled SpecHLA-derived resources (override with: SPECHLA=/path bash polyphase_v2.sh).
+BUNDLED_SPECHLA=${BUNDLED_SPECHLA:-${SCRIPTS_DIR}/resources/spechla}
+LEGACY_SPECHLA=${LEGACY_SPECHLA:-"$(cd "${SCRIPTS_DIR}/.." && pwd)/SpecHLA"}
+if [[ -z "${SPECHLA:-}" ]]; then
+    if [[ -d "$BUNDLED_SPECHLA" ]]; then
+        SPECHLA="$BUNDLED_SPECHLA"
+    else
+        SPECHLA="$LEGACY_SPECHLA"
+    fi
+fi
 SPECHLA_SCRIPT=${SPECHLA_SCRIPT:-${SPECHLA}/script}
 SPECHLA_DB=${SPECHLA_DB:-${SPECHLA}/db}
 HLA_REF=${HLA_REF:-${SPECHLA_DB}/ref/hla.ref.extend.fa}
@@ -371,6 +378,7 @@ PYEOF
             --gene-bed "$GENE_BED" \
             --genes "$GENE" \
             --out "$ASM_OUT" \
+            --imgt "$DB_PREFIX" \
             --paired-diploids \
             --bam "$MERGED_BAM" \
             --mask-min-depth "$MASK_MIN_DEPTH" \

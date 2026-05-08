@@ -18,7 +18,9 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_SPECHLA = Path(os.environ.get("SPECHLA", SCRIPT_DIR.parent / "SpecHLA"))
+DEFAULT_BUNDLED_SPECHLA = SCRIPT_DIR / "resources" / "spechla"
+DEFAULT_LEGACY_SPECHLA = SCRIPT_DIR.parent / "SpecHLA"
+DEFAULT_SPECHLA = Path(os.environ.get("SPECHLA", DEFAULT_BUNDLED_SPECHLA if DEFAULT_BUNDLED_SPECHLA.exists() else DEFAULT_LEGACY_SPECHLA))
 DEFAULT_G_GROUP = DEFAULT_SPECHLA / "db" / "HLA" / "hla_nom_g.txt"
 
 

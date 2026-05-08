@@ -235,13 +235,18 @@ def fit_4hap(obs_af, obs_dp, geno_mat, allele_names, chi_r,
 
 
 def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    bundled_spechla = os.path.join(script_dir, "resources", "spechla")
+    legacy_spechla = os.path.abspath(os.path.join(script_dir, "..", "SpecHLA"))
+    default_spechla = os.environ.get("SPECHLA", bundled_spechla if os.path.isdir(bundled_spechla) else legacy_spechla)
+    default_imgt = os.environ.get("IMGT_HLA_FASTA", os.path.join(default_spechla, "db", "ref", "hla_gen.format.filter.extend.DRB.no26789.v2.fasta"))
     ap = argparse.ArgumentParser()
     ap.add_argument('--pc-vcf', required=True)
     ap.add_argument('--ref', required=True)
     ap.add_argument('--gene', required=True)
     ap.add_argument('--contig', default=None)
     ap.add_argument('--bed', required=True)
-    ap.add_argument('--imgt', default='/data6/wangxuedong/polyploid_hla/SpecHLA/db/ref/hla_gen.format.filter.extend.DRB.no26789.v2.fasta')
+    ap.add_argument('--imgt', default=default_imgt)
     ap.add_argument('--chi-r', type=float, required=True)
     ap.add_argument('--top-n', type=int, default=40)
     ap.add_argument('--allowlist', default=None)

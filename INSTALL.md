@@ -1,8 +1,8 @@
 # Installation
 
 This pipeline ships as a self-contained set of scripts under `scripts/` plus
-one external dependency (the **SpecHLA** reference database). Follow the
-three steps below.
+bundled HLA reference resources under `scripts/resources/spechla/`. Follow the
+steps below.
 
 ---
 
@@ -26,32 +26,19 @@ from the active environment; override with `PYBIN=/path/to/python` or
 
 ---
 
-## 2. SpecHLA reference database
+## 2. Bundled HLA resources
 
-The pipeline reuses the SpecHLA database (combined per-gene reference +
-IMGT/HLA bowtie2 db + per-gene mini-refs). Get it from the upstream repo:
+The files needed from SpecHLA are already copied into the project:
 
-- https://github.com/deepomicslab/SpecHLA
+| Path | Contents |
+| --- | --- |
+| `scripts/resources/spechla/script/` | `uniq_read_name.py`, `assign_reads_to_genes.py` |
+| `scripts/resources/spechla/db/ref/` | combined HLA ref, IMGT allele FASTA, bowtie2/BWA/faidx indexes |
+| `scripts/resources/spechla/db/HLA/` | six per-gene refs, G group map, exon FASTAs |
 
-```bash
-git clone https://github.com/deepomicslab/SpecHLA.git
-# Follow SpecHLA's own README to download db/ (HLA references + IMGT db).
-```
-
-Place (or symlink) the resulting `SpecHLA/` directory next to `scripts/`:
-
-```
-<repo-root>/
-├── scripts/
-└── SpecHLA/
-    ├── db/
-    │   ├── ref/hla.ref.extend.fa
-    │   ├── ref/hla_gen.format.filter.extend.DRB.no26789.v2.fasta
-    │   └── HLA/HLA_<gene>/HLA_<gene>.fa
-    └── script/uniq_read_name.py, assign_reads_to_genes.py, ...
-```
-
-Or set `SPECHLA=/path/to/SpecHLA` before invoking the driver.
+No separate SpecHLA database download is required for the default workflow.
+Set `SPECHLA=/path/to/custom/resources` only when intentionally testing a custom
+or refreshed database laid out in the same `db/` and `script/` structure.
 
 ---
 
@@ -66,7 +53,7 @@ for t in python whatshap bowtie2 bwa samtools wgsim bcftools freebayes tabix; do
     command -v "$t" >/dev/null && echo "OK   $t" || echo "MISS $t"
 done
 python -c "import pysam, parasail, mappy, numpy, tqdm; print('python deps OK')"
-ls "${SPECHLA:-./SpecHLA}/db/ref/hla.ref.extend.fa"            # database check
+ls "${SPECHLA:-./scripts/resources/spechla}/db/ref/hla.ref.extend.fa"  # resource check
 ```
 
 All lines should print `OK` / file exists. A failed `MISS` or missing
@@ -83,7 +70,7 @@ in [README.md](README.md) §3.
 | ------- | ------------------ |
 | `freebayes: --pooled-continuous: option requires an argument` (or unknown option) | freebayes < 1.3; reinstall via `conda install -c bioconda freebayes=1.3.*`. |
 | `whatshap: error: unrecognized arguments: --ploidy` | whatshap < 1.4; upgrade to ≥ 2.2 (in `environment.yml`). |
-| Driver exits with `HLA_REF not found` | SpecHLA db not at `<repo>/SpecHLA/` and `SPECHLA` env var not set. |
+| Driver exits with `HLA_REF not found` | Bundled resources are missing, or `SPECHLA` points to an incomplete custom resource directory. |
 | `parasail`/`mappy` import error | conda env not activated, or installed via pip into wrong python. |
 | Empty `calls.tsv` for a gene | usually no reads assigned at step 1; check `spechla_out/<SAMPLE>/<gene>.R1.fq.gz` size. |
 
@@ -100,5 +87,6 @@ RUN conda env create -f /tmp/environment.yml && conda clean -afy
 SHELL ["conda", "run", "-n", "polyploid-hla", "/bin/bash", "-c"]
 ```
 
-The SpecHLA database is large (~ a few GB) and is typically mounted as a
-volume rather than baked into the image.
+The bundled HLA resources under `scripts/resources/spechla/` are part of the
+software image unless you deliberately replace them with a mounted custom
+database through `SPECHLA=/path/to/resources`.

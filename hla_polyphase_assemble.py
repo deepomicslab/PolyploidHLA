@@ -32,6 +32,18 @@ from collections import defaultdict
 
 import pysam
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BUNDLED_SPECHLA = os.path.join(SCRIPT_DIR, "resources", "spechla")
+LEGACY_SPECHLA = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "SpecHLA"))
+DEFAULT_SPECHLA = os.environ.get(
+    "SPECHLA",
+    BUNDLED_SPECHLA if os.path.isdir(BUNDLED_SPECHLA) else LEGACY_SPECHLA,
+)
+DEFAULT_IMGT = os.environ.get(
+    "IMGT_HLA_FASTA",
+    os.path.join(DEFAULT_SPECHLA, "db", "ref", "hla_gen.format.filter.extend.DRB.no26789.v2.fasta"),
+)
+
 try:
     from tqdm import tqdm
 except ImportError:
@@ -712,8 +724,7 @@ def process_gene(chrom, gstart, gend, gene, args, ref, sample_name):
             print(f"[{gene}] no usable blocks; skip", flush=True)
             return
 
-        # imgt_path = os.path.join(args.imgt_dir, f"{gene_to_imgt(gene)}_gen.fasta")
-        imgt_path = "/data6/wangxuedong/polyploid_hla/SpecHLA/db/ref/hla_gen.format.filter.extend.DRB.no26789.v2.fasta"
+        imgt_path = args.imgt
         if not os.path.exists(imgt_path):
             print(f"[{gene}] IMGT db missing: {imgt_path}; skip", flush=True)
             return
@@ -908,7 +919,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--vcf", required=True)
     ap.add_argument("--ref", required=True)
-    ap.add_argument("--imgt-dir", required=False)
+    ap.add_argument("--imgt", default=DEFAULT_IMGT,
+                    help="IMGT/HLA allele FASTA used for allele scoring")
+    ap.add_argument("--imgt-dir", required=False,
+                    help="deprecated; use --imgt")
     ap.add_argument("--gene-bed", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--sample", default=None,

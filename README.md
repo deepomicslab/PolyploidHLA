@@ -21,7 +21,8 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 | `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
 | `evaluate_calls.py`         | compares `<SAMPLE>.final_calls.tsv` with `truth_typing.tsv` at 2-field and G group resolution |
 | `exon_typing_from_haps.py`  | exon-level G group fallback/diagnostic for high-mask genes |
-| `gene.spechla.bed`          | per-gene typing region on `hla.ref.extend.fa` |
+| `gene.spechla.bed`          | per-gene typing region on bundled `hla.ref.extend.fa` |
+| `resources/spechla/`        | bundled SpecHLA-derived helper scripts and HLA reference files |
 | `environment.yml`           | conda environment spec |
 | `octopus_to_imgt.py`, `caller_free_4hap.py` | rejected alternatives, kept for reference |
 
@@ -34,8 +35,9 @@ See [INSTALL.md](INSTALL.md). Short version:
 ```bash
 conda env create -f scripts/environment.yml
 conda activate polyploid-hla
-# Then place / symlink the SpecHLA database at <repo>/SpecHLA, or
-# export SPECHLA=/path/to/SpecHLA before running.
+# HLA reference resources needed by the pipeline are bundled under
+# scripts/resources/spechla. Set SPECHLA=/path/to/custom/resources only
+# when intentionally overriding them.
 ```
 
 ---
@@ -94,7 +96,7 @@ Optional environment / database overrides:
 
 | Var | Default | Meaning |
 | --- | ------- | ------- |
-| `SPECHLA`  | `<repo>/SpecHLA`           | SpecHLA install root |
+| `SPECHLA`  | `scripts/resources/spechla` | bundled HLA resource root; override only for a custom database |
 | `PYBIN`    | first `python` on PATH     | python binary |
 | `WHATSHAP` | first `whatshap` on PATH   | whatshap binary |
 | `WORK_DIR` | `<repo>` (parent of scripts/) | base for output dirs |

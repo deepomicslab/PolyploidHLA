@@ -21,9 +21,11 @@ from collections import defaultdict
 import numpy as np
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BUNDLED_SPECHLA = os.path.join(SCRIPT_DIR, "resources", "spechla")
+LEGACY_SPECHLA = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "SpecHLA"))
 DEFAULT_SPECHLA = os.environ.get(
     "SPECHLA",
-    os.path.abspath(os.path.join(SCRIPT_DIR, "..", "SpecHLA")),
+    BUNDLED_SPECHLA if os.path.isdir(BUNDLED_SPECHLA) else LEGACY_SPECHLA,
 )
 DEFAULT_IMGT = os.environ.get(
     "IMGT_HLA_FASTA",
