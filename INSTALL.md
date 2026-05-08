@@ -19,9 +19,9 @@ plus `blastn` for optional exon-level G group fallback diagnostics. The
 simulation scripts. Version pins match what the pipeline was validated on.
 
 If you cannot use conda, install the same set manually and ensure all
-binaries are on `PATH`. The driver auto-discovers `python` and `whatshap`
-from the active environment; override with `PYBIN=/path/to/python` or
-`WHATSHAP=/path/to/whatshap` if needed.
+binaries are on `PATH`. The driver auto-discovers `python`, `whatshap`, and
+`freebayes` from the active environment; override with `PYBIN=/path/to/python`,
+`WHATSHAP=/path/to/whatshap`, or `FREEBAYES=/path/to/freebayes` if needed.
 
 ---
 
@@ -84,6 +84,7 @@ in [README.md](README.md) §3.
 | Symptom | Likely cause / fix |
 | ------- | ------------------ |
 | `freebayes: --pooled-continuous: option requires an argument` (or unknown option) | freebayes < 1.3; reinstall via `conda install -c bioconda freebayes=1.3.*`. |
+| `freebayes` aborts with a C++ vector assertion | use the pinned `freebayes=1.3.6` from `environment.yml`, or set `FREEBAYES=/path/to/freebayes-1.3.6`. |
 | `whatshap: error: unrecognized arguments: --ploidy` | whatshap < 1.4; upgrade to ≥ 2.2 (in `environment.yml`). |
 | Driver exits with `HLA_REF not found` | Bundled resources are missing, or `SPECHLA` points to an incomplete custom resource directory. |
 | `bowtie2` / `bwa` reports missing index files | run `bash build_resource_indexes.sh --resources "${SPECHLA:-resources/spechla}"`. |

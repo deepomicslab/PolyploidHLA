@@ -30,6 +30,7 @@ set -euo pipefail
 # WHATSHAP explicitly to pin a specific conda env.
 PYBIN=${PYBIN:-$(command -v python)}
 WHATSHAP=${WHATSHAP:-$(command -v whatshap)}
+FREEBAYES=${FREEBAYES:-$(command -v freebayes)}
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -229,7 +230,7 @@ run_one_sample () {
         echo "[skip] $VCF exists"
     else
         echo "[step] freebayes ploidy=4 (low-MAF / low-AC; haplotype-length 0 to suppress combinatorial FP)"
-        freebayes \
+        "$FREEBAYES" \
             -p "$PLOIDY" \
             --min-alternate-fraction "$FB_MIN_AF" \
             --min-alternate-count "$FB_MIN_AC" \
@@ -285,7 +286,7 @@ PYEOF
         local PC_LOG="${OUT}/${SPEC}.chi_pooled.txt"
         if [[ ! -f "$PC_VCF" || $SKIP_DONE -eq 0 ]]; then
             echo "[step] freebayes --pooled-continuous (chi_R estimation only)"
-            freebayes \
+            "$FREEBAYES" \
                 --pooled-continuous \
                 --min-alternate-fraction 0.005 \
                 --min-alternate-count 2 \

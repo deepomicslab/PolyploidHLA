@@ -102,6 +102,7 @@ Optional environment / database overrides:
 | `SPECHLA`  | `resources/spechla` | bundled HLA resource root; override only for a custom database |
 | `PYBIN`    | first `python` on PATH     | python binary |
 | `WHATSHAP` | first `whatshap` on PATH   | whatshap binary |
+| `FREEBAYES` | first `freebayes` on PATH | freebayes binary; use 1.3.6 if newer builds abort |
 | `THREADS`  | `8` | threads for bowtie2, BWA, whatshap, EM remap, and samtools helper steps |
 | `SAMTOOLS_THREADS` | `$THREADS` | threads for samtools view/sort/index/merge |
 | `WORK_DIR` | parent of this repository | base for output dirs |
