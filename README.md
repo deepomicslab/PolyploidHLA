@@ -102,7 +102,7 @@ Optional environment / database overrides:
 | `OUT_ROOT` | `${WORK_DIR}/spechla_out`  | per-sample alignments + VCFs |
 | `ASM_ROOT` | `${WORK_DIR}/asm_v2`       | typing outputs |
 | `EXON_TYPING` | `1` | also write exon-level fallback diagnostics (`<SAMPLE>.exon_calls.tsv`) |
-| `EM_REFINE_PER_GENE_CHI` | `0` | experimental; fixed pooled/global χ is default because it performs better on 267016 |
+| `EM_REFINE_PER_GENE_CHI` | `0` | experimental; fixed pooled/global χ is the recommended default |
 | `EM_REFINE_RECIPIENT_MINOR_RESCUE` | `1` | recover low-frequency recipient-only alleles when donor-major EM fitting collapses R/D to the donor-like pair |
 
 The options above cover the recommended user-facing settings.
@@ -166,20 +166,7 @@ false mismatches.
 
 ---
 
-## 7. Validation
-
-Two real samples (same patient, two time points), current default workflow:
-
-| Sample | χ_R | 2-field accuracy | G group accuracy |
-| ------ | --- | --------------- | ---------------- |
-| 267015-HLA-20260415EM_S1_L001 | 0.2721 | **24/24** | **24/24** |
-| 267016-HLA-20260415EM_S3_L001 | 0.2010 | **24/24** | **24/24** |
-
-These validation numbers are based on the current default workflow.
-
----
-
-## 8. Re-running idempotently
+## 7. Re-running idempotently
 
 `SKIP_DONE=1` (default) skips steps whose output already exists. To force a
 re-run from a specific step, delete its output and re-invoke the driver:
