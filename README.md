@@ -1,4 +1,4 @@
-# Polyploid HLA Typing — `scripts/`
+# Polyploid HLA Typing
 
 End-to-end pipeline for **chimeric (k=4) HLA typing** of allo-HSCT and
 solid-organ transplant samples from short-read FASTQs. Outputs 4 haplotype
@@ -33,28 +33,28 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 See [INSTALL.md](INSTALL.md). Short version:
 
 ```bash
-conda env create -f scripts/environment.yml
+conda env create -f environment.yml
 conda activate polyploid-hla
 # HLA reference resources needed by the pipeline are bundled under
-# scripts/resources/spechla. Set SPECHLA=/path/to/custom/resources only
+# resources/spechla. Set SPECHLA=/path/to/custom/resources only
 # when intentionally overriding them.
 
 # Optional: repair/rebuild bundled resource indexes.
-bash scripts/build_resource_indexes.sh
+bash build_resource_indexes.sh
 ```
 
 ---
 
 ## 3. Quick start
 
-From the repository root (the directory containing `scripts/`):
+From the repository root:
 
 ```bash
 FQ1=/path/sample.R1.fq.gz \
 FQ2=/path/sample.R2.fq.gz \
 SAMPLE=mySample \
 RECIPIENT_MAJOR=0 \
-bash scripts/polyphase_v2.sh
+bash polyphase_v2.sh
 ```
 
 **Final result — one file, all 6 genes:**
@@ -99,10 +99,10 @@ Optional environment / database overrides:
 
 | Var | Default | Meaning |
 | --- | ------- | ------- |
-| `SPECHLA`  | `scripts/resources/spechla` | bundled HLA resource root; override only for a custom database |
+| `SPECHLA`  | `resources/spechla` | bundled HLA resource root; override only for a custom database |
 | `PYBIN`    | first `python` on PATH     | python binary |
 | `WHATSHAP` | first `whatshap` on PATH   | whatshap binary |
-| `WORK_DIR` | `<repo>` (parent of scripts/) | base for output dirs |
+| `WORK_DIR` | parent of this repository | base for output dirs |
 | `OUT_ROOT` | `${WORK_DIR}/spechla_out`  | per-sample alignments + VCFs |
 | `ASM_ROOT` | `${WORK_DIR}/asm_v2`       | typing outputs |
 | `EXON_TYPING` | `1` | also write exon-level fallback diagnostics (`<SAMPLE>.exon_calls.tsv`) |
@@ -114,7 +114,7 @@ The options above cover the recommended user-facing settings.
 If indexes are missing after copying or replacing the resource directory, run:
 
 ```bash
-bash scripts/build_resource_indexes.sh --resources "${SPECHLA:-scripts/resources/spechla}"
+bash build_resource_indexes.sh --resources "${SPECHLA:-resources/spechla}"
 ```
 
 ---
@@ -163,7 +163,7 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
 If truth is available, evaluate with:
 
 ```bash
-python scripts/evaluate_calls.py \
+python evaluate_calls.py \
   --truth truth/truth_typing.tsv \
   --calls asm_v2/mySample/mySample.final_calls.tsv
 ```
@@ -184,5 +184,5 @@ re-run from a specific step, delete its output and re-invoke the driver:
 ```bash
 rm spechla_out/mySample/mySample.freebayes.vcf.gz   # re-do variant call
 rm -r asm_v2/mySample                               # re-do typing
-bash scripts/polyphase_v2.sh
+bash polyphase_v2.sh
 ```
