@@ -20,6 +20,7 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 | `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
 | `evaluate_calls.py`         | compares `<SAMPLE>.final_calls.tsv` with `truth_typing.tsv` at 2-field and G group resolution |
 | `exon_typing_from_haps.py`  | exon-level G group fallback/diagnostic for high-mask genes |
+| `build_resource_indexes.sh` | rebuilds HLA resource indexes when files are missing or a custom resource set is used |
 | `gene.spechla.bed`          | per-gene typing region on bundled `hla.ref.extend.fa` |
 | `resources/spechla/`        | bundled SpecHLA-derived helper scripts and HLA reference files |
 | `environment.yml`           | conda environment spec |
@@ -37,6 +38,9 @@ conda activate polyploid-hla
 # HLA reference resources needed by the pipeline are bundled under
 # scripts/resources/spechla. Set SPECHLA=/path/to/custom/resources only
 # when intentionally overriding them.
+
+# Optional: repair/rebuild bundled resource indexes.
+bash scripts/build_resource_indexes.sh
 ```
 
 ---
@@ -106,6 +110,12 @@ Optional environment / database overrides:
 | `EM_REFINE_RECIPIENT_MINOR_RESCUE` | `1` | recover low-frequency recipient-only alleles when donor-major EM fitting collapses R/D to the donor-like pair |
 
 The options above cover the recommended user-facing settings.
+
+If indexes are missing after copying or replacing the resource directory, run:
+
+```bash
+bash scripts/build_resource_indexes.sh --resources "${SPECHLA:-scripts/resources/spechla}"
+```
 
 ---
 

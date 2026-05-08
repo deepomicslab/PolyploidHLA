@@ -40,6 +40,21 @@ No separate SpecHLA database download is required for the default workflow.
 Set `SPECHLA=/path/to/custom/resources` only when intentionally testing a custom
 or refreshed database laid out in the same `db/` and `script/` structure.
 
+If the resource directory was copied without indexes, or if you replace it with
+a custom database, rebuild indexes with:
+
+```bash
+conda activate polyploid-hla
+bash scripts/build_resource_indexes.sh
+
+# or for a custom resource directory:
+bash scripts/build_resource_indexes.sh --resources /path/to/custom/resources
+```
+
+The script builds the required `samtools faidx`, BWA, and bowtie2 indexes. If
+`makeblastdb` is available, it also prepares BLAST databases for exon-level
+diagnostics.
+
 ---
 
 ## 3. Smoke test
@@ -49,10 +64,11 @@ Verify the environment is correctly resolved without running on real data:
 ```bash
 conda activate polyploid-hla
 bash -n scripts/polyphase_v2.sh                                # syntax check
-for t in python whatshap bowtie2 bwa samtools wgsim bcftools freebayes tabix; do
+for t in python whatshap bowtie2 bowtie2-build bwa samtools wgsim bcftools freebayes tabix makeblastdb; do
     command -v "$t" >/dev/null && echo "OK   $t" || echo "MISS $t"
 done
 python -c "import pysam, parasail, mappy, numpy, tqdm; print('python deps OK')"
+bash scripts/build_resource_indexes.sh                         # index check / repair
 ls "${SPECHLA:-./scripts/resources/spechla}/db/ref/hla.ref.extend.fa"  # resource check
 ```
 
@@ -71,6 +87,7 @@ in [README.md](README.md) §3.
 | `freebayes: --pooled-continuous: option requires an argument` (or unknown option) | freebayes < 1.3; reinstall via `conda install -c bioconda freebayes=1.3.*`. |
 | `whatshap: error: unrecognized arguments: --ploidy` | whatshap < 1.4; upgrade to ≥ 2.2 (in `environment.yml`). |
 | Driver exits with `HLA_REF not found` | Bundled resources are missing, or `SPECHLA` points to an incomplete custom resource directory. |
+| `bowtie2` / `bwa` reports missing index files | run `bash scripts/build_resource_indexes.sh --resources "${SPECHLA:-scripts/resources/spechla}"`. |
 | `parasail`/`mappy` import error | conda env not activated, or installed via pip into wrong python. |
 | Empty `calls.tsv` for a gene | usually no reads assigned at step 1; check `spechla_out/<SAMPLE>/<gene>.R1.fq.gz` size. |
 
