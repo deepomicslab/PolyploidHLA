@@ -124,6 +124,11 @@ fi
 
 mkdir -p "$OUT_ROOT" "$ASM_ROOT"
 
+vcf_ready () {
+    local vcf="$1"
+    [[ -s "$vcf" && -s "${vcf}.tbi" ]]
+}
+
 # Read gene.bed; suffix dup gene names with _2,_3
 declare -a CHROMS STARTS ENDS GENES TAGS
 declare -A SEEN
@@ -226,7 +231,7 @@ run_one_sample () {
     fi
 
     # ---- 4. freebayes -p 4 ----
-    if [[ -f "$VCF" && $SKIP_DONE -eq 1 ]]; then
+    if [[ $SKIP_DONE -eq 1 ]] && vcf_ready "$VCF"; then
         echo "[skip] $VCF exists"
     else
         echo "[step] freebayes ploidy=4 (low-MAF / low-AC; haplotype-length 0 to suppress combinatorial FP)"
@@ -284,7 +289,7 @@ PYEOF
     if [[ "${USE_POOLED_CHI:-1}" -eq 1 ]]; then
         local PC_VCF="${OUT}/${SPEC}.pooled_continuous.vcf.gz"
         local PC_LOG="${OUT}/${SPEC}.chi_pooled.txt"
-        if [[ ! -f "$PC_VCF" || $SKIP_DONE -eq 0 ]]; then
+        if [[ $SKIP_DONE -eq 0 ]] || ! vcf_ready "$PC_VCF"; then
             echo "[step] freebayes --pooled-continuous (chi_R estimation only)"
             "$FREEBAYES" \
                 --pooled-continuous \
@@ -332,7 +337,7 @@ PYEOF
         fi
         mkdir -p "$ASM_OUT"
 
-        if [[ -f "$FB_GENE_VCF" && $SKIP_DONE -eq 1 ]]; then
+        if [[ $SKIP_DONE -eq 1 ]] && vcf_ready "$FB_GENE_VCF"; then
             echo "[skip] $FB_GENE_VCF exists"
         else
             echo "[step] slice VCF -> $FB_GENE_VCF"
@@ -344,7 +349,7 @@ PYEOF
         local IN_FOR_PHASE="$FB_GENE_VCF"
         if [[ $GT_REASSIGN -eq 1 && -n "${CHI_R:-}" ]]; then
             local FB_REGT_VCF="${OUT}/${SPEC}.freebayes_regt.${TAG_LC}.vcf.gz"
-            if [[ -f "$FB_REGT_VCF" && $SKIP_DONE -eq 1 ]]; then
+            if [[ $SKIP_DONE -eq 1 ]] && vcf_ready "$FB_REGT_VCF"; then
                 echo "[skip] $FB_REGT_VCF exists"
             else
                 echo "[step] reassign GT under chi_R=$CHI_R"
@@ -358,7 +363,7 @@ PYEOF
             IN_FOR_PHASE="$FB_REGT_VCF"
         fi
 
-        if [[ -f "$PH_VCF" && $SKIP_DONE -eq 1 ]]; then
+        if [[ $SKIP_DONE -eq 1 ]] && vcf_ready "$PH_VCF"; then
             echo "[skip] $PH_VCF exists"
         else
             echo "[step] whatshap polyphase -> $PH_VCF"
