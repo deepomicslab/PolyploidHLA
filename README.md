@@ -102,10 +102,16 @@ Optional environment / database overrides:
 | `SPECHLA`  | `resources/spechla` | bundled HLA resource root; override only for a custom database |
 | `PYBIN`    | first `python` on PATH     | python binary |
 | `WHATSHAP` | first `whatshap` on PATH   | whatshap binary |
+| `THREADS`  | `8` | threads for bowtie2, BWA, whatshap, EM remap, and samtools helper steps |
+| `SAMTOOLS_THREADS` | `$THREADS` | threads for samtools view/sort/index/merge |
 | `WORK_DIR` | parent of this repository | base for output dirs |
 | `OUT_ROOT` | `${WORK_DIR}/spechla_out`  | per-sample alignments + VCFs |
 | `ASM_ROOT` | `${WORK_DIR}/asm_v2`       | typing outputs |
 | `EXON_TYPING` | `1` | also write exon-level fallback diagnostics (`<SAMPLE>.exon_calls.tsv`) |
+| `BOWTIE2_MODE` | `very-sensitive` | bowtie2 preset for IMGT competitive mapping; use `sensitive` for faster exploratory runs |
+| `BOWTIE2_K` | `30` | max alignments reported per read pair during IMGT competitive mapping |
+| `ASSEMBLE_ALIGNER` | `parasail` | base-level scorer; `mappy` is faster but less exact |
+| `ASSEMBLE_PREFILTER_TOP` | `200` | mappy prefilter size before parasail scoring; smaller is faster |
 | `EM_REFINE_PER_GENE_CHI` | `0` | experimental; fixed pooled/global χ is the recommended default |
 | `EM_REFINE_RECIPIENT_MINOR_RESCUE` | `1` | recover low-frequency recipient-only alleles when donor-major EM fitting collapses R/D to the donor-like pair |
 
@@ -115,6 +121,14 @@ If indexes are missing after copying or replacing the resource directory, run:
 
 ```bash
 bash build_resource_indexes.sh --resources "${SPECHLA:-resources/spechla}"
+```
+
+For exploratory reruns where speed matters more than final reporting, a useful
+starting point is:
+
+```bash
+THREADS=16 BOWTIE2_MODE=sensitive BOWTIE2_K=15 ASSEMBLE_PREFILTER_TOP=100 \
+bash polyphase_v2.sh
 ```
 
 ---

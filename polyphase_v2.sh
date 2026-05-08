@@ -56,7 +56,12 @@ ASSEMBLE_PY=${ASSEMBLE_PY:-${SCRIPTS_DIR}/hla_polyphase_assemble.py}
 
 PLOIDY=${PLOIDY:-4}
 THREADS=${THREADS:-8}
+SAMTOOLS_THREADS=${SAMTOOLS_THREADS:-$THREADS}
 SKIP_DONE=${SKIP_DONE:-1}
+
+# Speed/accuracy tradeoff knobs. Defaults preserve the validated workflow.
+BOWTIE2_MODE=${BOWTIE2_MODE:-very-sensitive}
+BOWTIE2_K=${BOWTIE2_K:-30}
 
 # freebayes params: low-donor friendly. Override via env if needed.
 FB_MIN_AF=${FB_MIN_AF:-0.03}
@@ -72,6 +77,8 @@ GT_DROP_FP_AF=${GT_DROP_FP_AF:-0.05}
 
 # masking
 MASK_MIN_DEPTH=${MASK_MIN_DEPTH:-5}
+ASSEMBLE_ALIGNER=${ASSEMBLE_ALIGNER:-parasail}
+ASSEMBLE_PREFILTER_TOP=${ASSEMBLE_PREFILTER_TOP:-200}
 
 # EM-based iterative remap refinement (post-baseline). 0 = off.
 EM_REFINE=${EM_REFINE:-1}
@@ -158,12 +165,13 @@ run_one_sample () {
         echo "[skip] $DB_BAM exists (bowtie2 -> IMGT db)"
     else
         echo "[step] competitive map to IMGT db (bowtie2)"
-        bowtie2 --very-sensitive -p "$THREADS" -k 30 \
+        bowtie2 "--${BOWTIE2_MODE}" -p "$THREADS" -k "$BOWTIE2_K" \
             -x "$DB_PREFIX" -1 "$UFQ1" -2 "$UFQ2" \
-            | samtools view -bS - | samtools sort - -o "$DB_BAM"
-        samtools index "$DB_BAM"
+            | samtools view -@ "$SAMTOOLS_THREADS" -bS - \
+            | samtools sort -@ "$SAMTOOLS_THREADS" -o "$DB_BAM" -
+        samtools index -@ "$SAMTOOLS_THREADS" "$DB_BAM"
     fi
-    [[ -f "${DB_BAM}.bai" ]] || samtools index "$DB_BAM"
+    [[ -f "${DB_BAM}.bai" ]] || samtools index -@ "$SAMTOOLS_THREADS" "$DB_BAM"
 
     if [[ -f "${OUT}/A.R1.fq.gz" && $SKIP_DONE -eq 1 ]]; then
         echo "[skip] per-gene binned fastqs exist"
@@ -198,9 +206,9 @@ run_one_sample () {
         echo "[step] bwa mem HLA-${hla}"
         bwa mem -t "$THREADS" -U 10000 -L 10000,10000 -R "$GROUP" \
             "$PER_REF" "$R1" "$R2" \
-            | samtools view -bS -F 0x800 - \
-            | samtools sort - -o "$PER_BAM"
-        samtools index "$PER_BAM"
+            | samtools view -@ "$SAMTOOLS_THREADS" -bS -F 0x800 - \
+            | samtools sort -@ "$SAMTOOLS_THREADS" -o "$PER_BAM" -
+        samtools index -@ "$SAMTOOLS_THREADS" "$PER_BAM"
     done
 
     # ---- 3. merge into one BAM on combined HLA ref ----
@@ -212,8 +220,8 @@ run_one_sample () {
             [[ -f "${OUT}/${hla}.bam" ]] && TO_MERGE+=("${OUT}/${hla}.bam")
         done
         echo "[step] samtools merge -> $MERGED_BAM"
-        samtools merge -f -h "${OUT}/header.sam" "$MERGED_BAM" "${TO_MERGE[@]}"
-        samtools index "$MERGED_BAM"
+        samtools merge -@ "$SAMTOOLS_THREADS" -f -h "${OUT}/header.sam" "$MERGED_BAM" "${TO_MERGE[@]}"
+        samtools index -@ "$SAMTOOLS_THREADS" "$MERGED_BAM"
     fi
 
     # ---- 4. freebayes -p 4 ----
@@ -382,6 +390,8 @@ PYEOF
             --paired-diploids \
             --bam "$MERGED_BAM" \
             --mask-min-depth "$MASK_MIN_DEPTH" \
+            --aligner "$ASSEMBLE_ALIGNER" \
+            --prefilter-top "$ASSEMBLE_PREFILTER_TOP" \
             "${CHIM_ARGS[@]}" \
             --dump-block-fa
     done
