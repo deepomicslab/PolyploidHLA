@@ -82,6 +82,10 @@ The file keeps both high-resolution calls and conservative report calls:
 * `*_g_group`: allele converted through SpecHLA `hla_nom_g.txt`.
 * `*_report`: equals `*_full` by default; automatically downgraded to 2-field
   when a gene has high masked sequence fraction.
+* `*_fraction`: modelled haplotype proportion for the reported R1/R2/D1/D2
+  call. In the standard 2+2 chimerism model, R haplotypes are `chi_R / 2` each
+  and D haplotypes are `(1 - chi_R) / 2` each; EM/direct modes use the fitted
+  gene-specific chi when available.
 * `mean_mask_fraction`, `report_level`, `warning`: explain why a gene was
   reported at full vs. 2-field resolution.
 
@@ -186,9 +190,13 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
 
 * `<SAMPLE>.final_calls.tsv` columns:
   `sample | gene | R1_full | R2_full | D1_full | D2_full | R1_2field | ... |
-  R1_g_group | ... | R1_report | ... | source | mean_mask_fraction | report_level | warning`.
+  R1_g_group | ... | R1_report | ... | R1_fraction | R2_fraction |
+  D1_fraction | D2_fraction | source | mean_mask_fraction | report_level |
+  warning`.
 * Per-gene `calls.tsv` columns:
-  `global_hap | assignment(R/D) | allele | em_weight`.
+  `global_hap | assignment(R/D) | allele | hap_fraction | em_weight` for
+  EM-refined calls, or `... | hap_fraction | total_assembly_score` for baseline
+  assembly calls.
 
 If truth is available, evaluate with:
 

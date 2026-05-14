@@ -888,9 +888,15 @@ def process_gene(chrom, gstart, gend, gene, args, ref, sample_name):
             return
 
         with open(os.path.join(out_gene_dir, "calls.tsv"), "w") as fh:
-            fh.write("global_hap\tassignment\tallele\ttotal_assembly_score\n")
+            fh.write("global_hap\tassignment\tallele\thap_fraction\ttotal_assembly_score\n")
             for h, a in enumerate(chosen):
-                fh.write(f"{h+1}\t{assignment[h+1]}\t{a}\t{total:.2f}\n")
+                side = assignment[h + 1]
+                if chi_r is None or side not in {"R", "D"}:
+                    hap_fraction = "NA"
+                else:
+                    frac = chi_r / 2.0 if side == "R" else (1.0 - chi_r) / 2.0
+                    hap_fraction = f"{frac:.6f}"
+                fh.write(f"{h+1}\t{side}\t{a}\t{hap_fraction}\t{total:.2f}\n")
         tag = "paired(R/D)" if args.paired_diploids else "unconstrained"
         print(f"[{gene}] {tag}: " +
               ", ".join(f"{assignment[i+1]}:{a}" for i, a in enumerate(chosen)) +

@@ -111,13 +111,16 @@ def write_direct_calls(call_dir: Path, lifted_quartet, source_row) -> None:
     backup = call_dir / "calls.direct_gate_input.tsv"
     if not backup.exists():
         shutil.copy2(calls, backup)
-    fields = ["global_hap", "assignment", "allele", "direct_likelihood_gap", "direct_chi", "direct_n_reads"]
+    fields = ["global_hap", "assignment", "allele", "hap_fraction", "direct_likelihood_gap", "direct_chi", "direct_n_reads"]
     rows = []
+    chi = float(source_row["chi_direct"])
     for index, (assignment, allele) in enumerate(zip(ASSIGNMENTS, lifted_quartet), 1):
+        hap_fraction = chi / 2.0 if assignment == "R" else (1.0 - chi) / 2.0
         rows.append({
             "global_hap": str(index),
             "assignment": assignment,
             "allele": allele,
+            "hap_fraction": f"{hap_fraction:.6f}",
             "direct_likelihood_gap": source_row["gap"],
             "direct_chi": source_row["chi_direct"],
             "direct_n_reads": source_row["n_reads"],

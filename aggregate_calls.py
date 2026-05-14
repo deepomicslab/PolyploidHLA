@@ -6,10 +6,12 @@ a single tab-separated file. The full allele calls are preserved, and extra
 2-field, G group, and report columns are emitted for low-resolution / G group
 truth comparison and low-coverage genes.
 
-    sample  gene  R1_full  R2_full  D1_full  D2_full  R1_2field  R1_g_group ...
+    sample  gene  R1_full  R2_full  D1_full  D2_full  R1_fraction ...
 
-`source` is `em-refined` if a `calls.baseline.tsv` sibling exists (meaning the
-EM stage overrode the baseline), otherwise `baseline`.
+`R1_fraction`/`R2_fraction`/`D1_fraction`/`D2_fraction` are the modelled
+haplotype proportions for each reported call. `source` is `em-refined` if a
+`calls.baseline.tsv` sibling exists (meaning the EM stage overrode the
+baseline), otherwise `baseline`.
 
 Usage:
     aggregate_calls.py --asm-root asm_v2 --sample mySample \\
@@ -112,7 +114,7 @@ def fasta_n_fraction(path: Path) -> Optional[float]:
 
 
 def read_calls(path: Path):
-    """Return list of (global_hap, assignment, allele) sorted by global_hap."""
+    """Return per-haplotype call rows sorted by global_hap."""
     rows = []
     with path.open() as f:
         header = f.readline().rstrip("\n").split("\t")
@@ -127,9 +129,30 @@ def read_calls(path: Path):
             parts = line.rstrip("\n").split("\t")
             if len(parts) <= max(i_h, i_a, i_l):
                 continue
-            rows.append((parts[i_h], parts[i_a], parts[i_l]))
-    rows.sort(key=lambda r: int(r[0]) if r[0].isdigit() else r[0])
+            row = {name: parts[idx] if idx < len(parts) else "" for idx, name in enumerate(header)}
+            rows.append(row)
+    rows.sort(key=lambda r: int(r.get("global_hap", "")) if r.get("global_hap", "").isdigit() else r.get("global_hap", ""))
     return rows
+
+
+def call_value(row: Optional[dict], key: str, default: str = "NA") -> str:
+    if not row:
+        return default
+    value = row.get(key, default)
+    return value if value not in {"", None} else default
+
+
+def call_fraction(row: Optional[dict]) -> str:
+    if not row:
+        return "NA"
+    for key in ("hap_fraction", "haplotype_fraction", "fraction", "ratio"):
+        value = row.get(key)
+        if value not in {None, "", "NA"}:
+            try:
+                return f"{float(value):.6f}"
+            except ValueError:
+                return str(value)
+    return "NA"
 
 
 def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap):
@@ -145,15 +168,20 @@ def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap):
             out_rows.append({
                 "sample": sample, "gene": gene,
                 "R1_full": "NA", "R2_full": "NA", "D1_full": "NA", "D2_full": "NA",
+                "R1_fraction": "NA", "R2_fraction": "NA", "D1_fraction": "NA", "D2_fraction": "NA",
                 "source": "missing", "mean_mask_fraction": "NA",
                 "report_level": "missing", "warning": "missing_calls_tsv",
             })
             continue
         rows = read_calls(calls)
-        rs = [a for (_, t, a) in rows if t == "R"]
-        ds = [a for (_, t, a) in rows if t == "D"]
-        rs = (rs + ["NA", "NA"])[:2]
-        ds = (ds + ["NA", "NA"])[:2]
+        r_rows = [row for row in rows if row.get("assignment") == "R"]
+        d_rows = [row for row in rows if row.get("assignment") == "D"]
+        r_rows = (r_rows + [None, None])[:2]
+        d_rows = (d_rows + [None, None])[:2]
+        rs = [call_value(row, "allele") for row in r_rows]
+        ds = [call_value(row, "allele") for row in d_rows]
+        rf = [call_fraction(row) for row in r_rows]
+        df = [call_fraction(row) for row in d_rows]
         source = "em-refined" if (d / "calls.baseline.tsv").exists() else "baseline"
         high_mask = mean_mask is not None and mean_mask >= mask_warn
         report_level = "2-field" if high_mask else "full"
@@ -169,6 +197,8 @@ def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap):
             "R2_report": allele_2field(rs[1]) if high_mask else rs[1],
             "D1_report": allele_2field(ds[0]) if high_mask else ds[0],
             "D2_report": allele_2field(ds[1]) if high_mask else ds[1],
+            "R1_fraction": rf[0], "R2_fraction": rf[1],
+            "D1_fraction": df[0], "D2_fraction": df[1],
             "source": source,
             "mean_mask_fraction": "NA" if mean_mask is None else f"{mean_mask:.4f}",
             "report_level": report_level,
@@ -199,6 +229,7 @@ def main():
         "R1_2field", "R2_2field", "D1_2field", "D2_2field",
         "R1_g_group", "R2_g_group", "D1_g_group", "D2_g_group",
         "R1_report", "R2_report", "D1_report", "D2_report",
+        "R1_fraction", "R2_fraction", "D1_fraction", "D2_fraction",
         "source", "mean_mask_fraction", "report_level", "warning",
     ]
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -160,16 +160,23 @@ def write_rescue_calls(call_dir: Path, lifted_quartet, source_row) -> None:
     calls = call_dir / "calls.tsv"
     if not calls.exists():
         raise FileNotFoundError(calls)
+    _old_fields, old_rows = read_call_rows(calls)
+    old_fraction_by_hap = {
+        row.get("global_hap", ""): row.get("hap_fraction", "NA")
+        for row in old_rows
+    }
     backup = call_dir / "calls.class2_joint_input.tsv"
     if not backup.exists():
         shutil.copy2(calls, backup)
-    fields = ["global_hap", "assignment", "allele", "class2_joint_rule", "class2_joint_reason"]
+    fields = ["global_hap", "assignment", "allele", "hap_fraction", "class2_joint_rule", "class2_joint_reason"]
     rows = []
     for index, (assignment, allele) in enumerate(zip(ASSIGNMENTS, lifted_quartet), 1):
+        hap = str(index)
         rows.append({
-            "global_hap": str(index),
+            "global_hap": hap,
             "assignment": assignment,
             "allele": allele,
+            "hap_fraction": old_fraction_by_hap.get(hap, "NA"),
             "class2_joint_rule": source_row["rule"],
             "class2_joint_reason": source_row["reason"],
         })

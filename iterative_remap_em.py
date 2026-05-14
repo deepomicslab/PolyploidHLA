@@ -705,18 +705,20 @@ def main():
         if low_private_detail:
             print(f"  low-recipient-private rescue: {low_private_detail}", flush=True)
         with open(os.path.join(args.out_dir, f"{g}.iterative.tsv"), "w") as fh:
-            fh.write("global_hap\tassignment\tallele_2field\tem_weight\n")
+            fh.write("global_hap\tassignment\tallele_2field\thap_fraction\tem_weight\n")
             for i, (nm, side) in enumerate(zip(winners, ["R","R","D","D"]), 1):
-                fh.write(f"{i}\t{side}\t{nm}\t{tf_counts.get(nm, 0):.2f}\n")
+                hap_fraction = fit_chi / 2.0 if side == "R" else (1.0 - fit_chi) / 2.0
+                fh.write(f"{i}\t{side}\t{nm}\t{hap_fraction:.6f}\t{tf_counts.get(nm, 0):.2f}\n")
         # also emit a calls.tsv-shaped file matching hla_polyphase_assemble.py
         # output, so polyphase_v2.sh can drop it in as an override.
         # Use the longest-sub-allele representative for each 2-field winner.
         with open(os.path.join(args.out_dir, f"{g}.calls.tsv"), "w") as fh:
-            fh.write("global_hap\tassignment\tallele\tem_weight\n")
+            fh.write("global_hap\tassignment\tallele\thap_fraction\tem_weight\n")
             for i, (nm, side) in enumerate(zip(winners, ["R","R","D","D"]), 1):
                 rep_safe = tf_to_safe.get(nm, safe(nm))
                 rep = safe2name.get(rep_safe, nm)
-                fh.write(f"{i}\t{side}\t{rep}\t{tf_counts.get(nm, 0):.2f}\n")
+                hap_fraction = fit_chi / 2.0 if side == "R" else (1.0 - fit_chi) / 2.0
+                fh.write(f"{i}\t{side}\t{rep}\t{hap_fraction:.6f}\t{tf_counts.get(nm, 0):.2f}\n")
         # per-gene summary line for downstream gating
         with open(os.path.join(args.out_dir, f"{g}.summary.tsv"), "w") as fh:
             fh.write("gene\tsum_abs_diff\tn_reads\ttop_frac\tchi_r_fit\n")
