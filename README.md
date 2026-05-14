@@ -17,6 +17,9 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 | `reassign_gt_chimeric.py`   | χ-aware GT correction before phasing |
 | `estimate_chi_pooled.py`    | pooled-continuous χ_R estimator |
 | `iterative_remap_em.py`     | EM refinement (Salmon-style read remap) |
+| `rescue_gene_binned_reads.py` | conservative read-bin rescue v2 before per-gene alignment |
+| `apply_class2_joint_rescue.py` | guarded class-II post-aggregate rescue |
+| `em_refine_gate.py`         | per-gene EM override gate logic |
 | `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
 | `evaluate_calls.py`         | compares `<SAMPLE>.final_calls.tsv` with `truth_typing.tsv` at 2-field and G group resolution |
 | `exon_typing_from_haps.py`  | exon-level G group fallback/diagnostic for high-mask genes |
@@ -115,8 +118,18 @@ Optional environment / database overrides:
 | `ASSEMBLE_PREFILTER_TOP` | `200` | mappy prefilter size before parasail scoring; smaller is faster |
 | `EM_REFINE_PER_GENE_CHI` | `0` | experimental; fixed pooled/global χ is the recommended default |
 | `EM_REFINE_RECIPIENT_MINOR_RESCUE` | `1` | recover low-frequency recipient-only alleles when donor-major EM fitting collapses R/D to the donor-like pair |
+| `READ_BIN_RESCUE` | `1` | run truth-free read-bin rescue before per-gene alignment |
+| `READ_BIN_RESCUE_GENES` | `HLA-DPB1` | default target for conservative rescue; broaden only for validation |
+| `READ_BIN_RESCUE_RETENTION_GATE` | `1` | require abnormal full-vs-retained read support loss before rewriting a bin |
+| `REUSE_BINNING_ROOT` | empty | seed deduped FASTQs, DB BAM, per-gene FASTQs, and `header.sam` from a prior run |
+| `REUSE_BINNING_CLEAN_DOWNSTREAM` | `0` | remove downstream outputs after seeding cache when intentionally recomputing calls |
 
 The options above cover the recommended user-facing settings.
+
+The default read-bin rescue is deliberately conservative: DPB1-only,
+paired-mate evidence, and retention-gated. Broad all-gene rescue addresses a
+real binning-loss failure mode but can increase phasing cost and should be run
+only as an explicit validation mode.
 
 If indexes are missing after copying or replacing the resource directory, run:
 
@@ -166,6 +179,8 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
     <SAMPLE>.merge.bam, .freebayes.vcf.gz, .pooled_continuous.vcf.gz, ...
     <SAMPLE>.chimerism.txt            χ from AD-cluster estimator
     <SAMPLE>.chi_pooled.txt           χ from pooled-continuous (per gene)
+    read_bin_rescue_manifest.tsv      rescue counts, retention gate, final status
+    class2_joint_rescue_manifest.tsv  guarded class-II rescue audit trail
     em_refine/<gene>.{calls,summary,iterative}.tsv
 ```
 
@@ -201,3 +216,16 @@ rm spechla_out/mySample/mySample.freebayes.vcf.gz   # re-do variant call
 rm -r asm_v2/mySample                               # re-do typing
 bash polyphase_v2.sh
 ```
+
+For expensive real-data replays, reuse the dedup / competitive DB map /
+per-gene binning outputs and recompute only downstream steps:
+
+```bash
+REUSE_BINNING_ROOT=/path/to/previous/spechla_out \
+REUSE_BINNING_CLEAN_DOWNSTREAM=1 \
+SKIP_DONE=1 \
+bash polyphase_v2.sh
+```
+
+When reporting accuracy, regenerate evaluation from the current
+`final_calls.tsv`; stale `*.eval.txt` files can describe an older call set.
