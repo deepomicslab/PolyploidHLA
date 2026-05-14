@@ -59,10 +59,32 @@ PLOIDY=${PLOIDY:-4}
 THREADS=${THREADS:-8}
 SAMTOOLS_THREADS=${SAMTOOLS_THREADS:-$THREADS}
 SKIP_DONE=${SKIP_DONE:-1}
+REUSE_BINNING_ROOT=${REUSE_BINNING_ROOT:-}
+REUSE_BINNING_CLEAN_DOWNSTREAM=${REUSE_BINNING_CLEAN_DOWNSTREAM:-0}
 
 # Speed/accuracy tradeoff knobs. Defaults preserve the validated workflow.
 BOWTIE2_MODE=${BOWTIE2_MODE:-very-sensitive}
 BOWTIE2_K=${BOWTIE2_K:-30}
+
+# Truth-free read-binning rescue. Keep the default conservative: DPB1-only,
+# paired-end evidence, and retention-gated so broad all-gene rescue remains
+# an explicit validation/diagnostic mode.
+READ_BIN_RESCUE=${READ_BIN_RESCUE:-1}
+READ_BIN_RESCUE_PY=${READ_BIN_RESCUE_PY:-${SCRIPTS_DIR}/rescue_gene_binned_reads.py}
+READ_BIN_RESCUE_GENES=${READ_BIN_RESCUE_GENES:-"HLA-DPB1"}
+READ_BIN_RESCUE_BACKGROUND_GENES=${READ_BIN_RESCUE_BACKGROUND_GENES:-"HLA-A HLA-B HLA-C HLA-DRB1 HLA-DPB1 HLA-DQB1"}
+READ_BIN_RESCUE_K=${READ_BIN_RESCUE_K:-31}
+READ_BIN_RESCUE_MIN_HITS=${READ_BIN_RESCUE_MIN_HITS:-10}
+READ_BIN_RESCUE_MIN_MARGIN=${READ_BIN_RESCUE_MIN_MARGIN:-5}
+READ_BIN_RESCUE_REQUIRE_BOTH_MATES=${READ_BIN_RESCUE_REQUIRE_BOTH_MATES:-1}
+READ_BIN_RESCUE_MIN_MATE_HITS=${READ_BIN_RESCUE_MIN_MATE_HITS:-1}
+READ_BIN_RESCUE_MAX_FRAC=${READ_BIN_RESCUE_MAX_FRAC:-0.25}
+READ_BIN_RESCUE_MAX_PAIRS=${READ_BIN_RESCUE_MAX_PAIRS:-100000}
+READ_BIN_RESCUE_RETENTION_GATE=${READ_BIN_RESCUE_RETENTION_GATE:-1}
+READ_BIN_RESCUE_RETENTION_MIN_FULL_PAIRS=${READ_BIN_RESCUE_RETENTION_MIN_FULL_PAIRS:-50}
+READ_BIN_RESCUE_RETENTION_MAX_RETAINED_FRAC=${READ_BIN_RESCUE_RETENTION_MAX_RETAINED_FRAC:-0.10}
+READ_BIN_RESCUE_RETENTION_MIN_MISSING_FRAC=${READ_BIN_RESCUE_RETENTION_MIN_MISSING_FRAC:-0.30}
+READ_BIN_RESCUE_RETENTION_MIN_RESCUE_PAIRS=${READ_BIN_RESCUE_RETENTION_MIN_RESCUE_PAIRS:-50}
 
 # freebayes params: low-donor friendly. Override via env if needed.
 FB_MIN_AF=${FB_MIN_AF:-0.03}
@@ -96,13 +118,73 @@ EM_REFINE_RECIPIENT_MINOR_RESCUE=${EM_REFINE_RECIPIENT_MINOR_RESCUE:-1}
 EM_REFINE_RESCUE_MIN_FRAC=${EM_REFINE_RESCUE_MIN_FRAC:-0.001}
 EM_REFINE_RESCUE_MIN_COUNT=${EM_REFINE_RESCUE_MIN_COUNT:-20}
 EM_REFINE_RESCUE_MAX_FRAC=${EM_REFINE_RESCUE_MAX_FRAC:-0.08}
+EM_REFINE_LOW_RECIPIENT_PRIVATE_RESCUE=${EM_REFINE_LOW_RECIPIENT_PRIVATE_RESCUE:-1}
+EM_REFINE_LOW_RECIPIENT_PRIVATE_GENES=${EM_REFINE_LOW_RECIPIENT_PRIVATE_GENES:-HLA-C}
+EM_REFINE_LOW_RECIPIENT_PRIVATE_MAX_FRAC=${EM_REFINE_LOW_RECIPIENT_PRIVATE_MAX_FRAC:-0.02}
+EM_REFINE_LOW_RECIPIENT_PRIVATE_DOSE_RATIO=${EM_REFINE_LOW_RECIPIENT_PRIVATE_DOSE_RATIO:-0.20}
 EM_REFINE_PY=${EM_REFINE_PY:-${SCRIPTS_DIR}/iterative_remap_em.py}
+EM_REFINE_GATE_PY=${EM_REFINE_GATE_PY:-${SCRIPTS_DIR}/em_refine_gate.py}
+EM_REFINE_GATE_HIGH_MASK=${EM_REFINE_GATE_HIGH_MASK:-0.40}
+EM_REFINE_GATE_AMBIG_DIFF=${EM_REFINE_GATE_AMBIG_DIFF:-0.35}
+EM_REFINE_GATE_AMBIG_TOP=${EM_REFINE_GATE_AMBIG_TOP:-0.42}
+EM_REFINE_GATE_SELECTED_MIN_FRAC=${EM_REFINE_GATE_SELECTED_MIN_FRAC:-0.0005}
+EM_REFINE_GATE_BASELINE_MIN_FRAC=${EM_REFINE_GATE_BASELINE_MIN_FRAC:-0.005}
+EM_REFINE_GATE_BASELINE_NEAR_TIE=${EM_REFINE_GATE_BASELINE_NEAR_TIE:-0.001}
+EM_REFINE_GATE_CLASS_I_BASELINE_GENES=${EM_REFINE_GATE_CLASS_I_BASELINE_GENES:-HLA-A}
+EM_REFINE_GATE_CLASS_I_BASELINE_DIFF=${EM_REFINE_GATE_CLASS_I_BASELINE_DIFF:-0.20}
+EM_REFINE_GATE_CLASS_I_BASELINE_TOP=${EM_REFINE_GATE_CLASS_I_BASELINE_TOP:-0.50}
+# Class-II hap assemblies are often partially masked in these short-read data;
+# use stricter EM override gates there so lack of support is not overread as
+# absence. A/B/C keep the global 0.7 gate unless explicitly overridden.
+EM_REFINE_GATE_GENE_MAX_DIFF=${EM_REFINE_GATE_GENE_MAX_DIFF:-HLA-DRB1=0.35,HLA-DPB1=0.20,HLA-DQB1=0.50}
+EM_REFINE_GATE_GENE_HIGH_MASK=${EM_REFINE_GATE_GENE_HIGH_MASK:-}
+EM_REFINE_GATE_GENE_AMBIG_DIFF=${EM_REFINE_GATE_GENE_AMBIG_DIFF:-}
+EM_REFINE_GATE_GENE_AMBIG_TOP=${EM_REFINE_GATE_GENE_AMBIG_TOP:-}
+EM_REFINE_GATE_GENE_SELECTED_MIN_FRAC=${EM_REFINE_GATE_GENE_SELECTED_MIN_FRAC:-}
+EM_REFINE_GATE_GENE_BASELINE_MIN_FRAC=${EM_REFINE_GATE_GENE_BASELINE_MIN_FRAC:-}
+EM_REFINE_GATE_GENE_BASELINE_NEAR_TIE=${EM_REFINE_GATE_GENE_BASELINE_NEAR_TIE:-}
 
 # Optional exon-level G group fallback/diagnostic for high-mask genes. This
 # writes <SAMPLE>.exon_calls.tsv but does not override final calls.
 EXON_TYPING=${EXON_TYPING:-1}
 EXON_TYPING_GENES=${EXON_TYPING_GENES:-"HLA-DRB1 HLA-DPB1 HLA-DQB1"}
 EXON_TYPING_PY=${EXON_TYPING_PY:-${SCRIPTS_DIR}/exon_typing_from_haps.py}
+
+# Optional post-aggregate constrained direct-likelihood gate. This is off by
+# default; when enabled it only searches quartets made from current/baseline
+# alleles and applies changes with a high likelihood-gap threshold.
+DIRECT_CONSTRAINED_GATE=${DIRECT_CONSTRAINED_GATE:-0}
+DIRECT_CONSTRAINED_GATE_GENES=${DIRECT_CONSTRAINED_GATE_GENES:-"HLA-DRB1 HLA-DPB1 HLA-DQB1"}
+DIRECT_CONSTRAINED_GATE_GAP=${DIRECT_CONSTRAINED_GATE_GAP:-150}
+DIRECT_CONSTRAINED_GATE_TOP_N=${DIRECT_CONSTRAINED_GATE_TOP_N:-0}
+DIRECT_CONSTRAINED_GATE_MIN_FRAC=${DIRECT_CONSTRAINED_GATE_MIN_FRAC:-0.002}
+DIRECT_CONSTRAINED_GATE_MIN_AS_FRAC=${DIRECT_CONSTRAINED_GATE_MIN_AS_FRAC:-0.95}
+DIRECT_CONSTRAINED_GATE_FAMILY_AGG=${DIRECT_CONSTRAINED_GATE_FAMILY_AGG:-max}
+DIRECT_CONSTRAINED_BATCH_PY=${DIRECT_CONSTRAINED_BATCH_PY:-${SCRIPTS_DIR}/direct_quartet_likelihood_batch.py}
+DIRECT_CONSTRAINED_APPLY_PY=${DIRECT_CONSTRAINED_APPLY_PY:-${SCRIPTS_DIR}/apply_direct_constrained_gate.py}
+
+# Class-II joint rescue. Enabled by default because the rules are guarded by
+# high-mask gates and only touch DRB1/DPB1 failure modes validated on the real
+# set. Set CLASS2_JOINT_RESCUE=0 to disable. It is truth-free and writes
+# backups as calls.class2_joint_input.tsv.
+CLASS2_JOINT_RESCUE=${CLASS2_JOINT_RESCUE:-1}
+CLASS2_JOINT_RESCUE_PY=${CLASS2_JOINT_RESCUE_PY:-${SCRIPTS_DIR}/apply_class2_joint_rescue.py}
+CLASS2_JOINT_DRB1_MIN_MASK=${CLASS2_JOINT_DRB1_MIN_MASK:-0.40}
+CLASS2_JOINT_DPB1_MIN_MASK=${CLASS2_JOINT_DPB1_MIN_MASK:-0.40}
+CLASS2_JOINT_DPB1_RARE_CUTOFF=${CLASS2_JOINT_DPB1_RARE_CUTOFF:-100}
+CLASS2_JOINT_DPB1_MIN_FRAC=${CLASS2_JOINT_DPB1_MIN_FRAC:-0.02}
+CLASS2_JOINT_DPB1_TOP_COMMON=${CLASS2_JOINT_DPB1_TOP_COMMON:-6}
+CLASS2_JOINT_DPB1_COMMON_MINOR=${CLASS2_JOINT_DPB1_COMMON_MINOR:-1}
+CLASS2_JOINT_DPB1_COMMON_MINOR_MAX_NUMBER=${CLASS2_JOINT_DPB1_COMMON_MINOR_MAX_NUMBER:-10}
+CLASS2_JOINT_DPB1_COMMON_MINOR_MIN_FRAC=${CLASS2_JOINT_DPB1_COMMON_MINOR_MIN_FRAC:-0.005}
+CLASS2_JOINT_DPB1_COMMON_MINOR_MAX_FRAC=${CLASS2_JOINT_DPB1_COMMON_MINOR_MAX_FRAC:-0.09}
+CLASS2_JOINT_DPB1_COMMON_MINOR_MIN_WEIGHT=${CLASS2_JOINT_DPB1_COMMON_MINOR_MIN_WEIGHT:-50}
+CLASS2_JOINT_DPB1_COMMON_MINOR_TOP=${CLASS2_JOINT_DPB1_COMMON_MINOR_TOP:-12}
+CLASS2_JOINT_DPB1_ABSOLUTE_COMMON=${CLASS2_JOINT_DPB1_ABSOLUTE_COMMON:-1}
+CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MAX_NUMBER=${CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MAX_NUMBER:-10}
+CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MIN_WEIGHT=${CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MIN_WEIGHT:-150}
+CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MIN_FRAC=${CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MIN_FRAC:-0.01}
+CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MIN_RATIO=${CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MIN_RATIO:-2.0}
 
 # chimerism prior: 0 = donor major (allo-HSCT recipient blood, default).
 # Set to 1 for solid-organ tx etc.
@@ -129,6 +211,66 @@ vcf_ready () {
     [[ -s "$vcf" && -s "${vcf}.tbi" ]]
 }
 
+clean_reuse_downstream_outputs () {
+    local SPEC="$1"
+    local OUT="$2"
+    echo "[step] clean downstream outputs in target run before recomputing"
+    rm -f "${OUT}"/A.bam "${OUT}"/A.bam.bai "${OUT}"/B.bam "${OUT}"/B.bam.bai "${OUT}"/C.bam "${OUT}"/C.bam.bai
+    rm -f "${OUT}"/DPB1.bam "${OUT}"/DPB1.bam.bai "${OUT}"/DQB1.bam "${OUT}"/DQB1.bam.bai "${OUT}"/DRB1.bam "${OUT}"/DRB1.bam.bai
+    rm -f "${OUT}/${SPEC}.merge.bam" "${OUT}/${SPEC}.merge.bam.bai"
+    rm -f "${OUT}"/*.freebayes*.vcf.gz "${OUT}"/*.freebayes*.vcf.gz.tbi
+    rm -f "${OUT}"/*.phased*.vcf.gz "${OUT}"/*.phased*.vcf.gz.tbi "${OUT}"/*.pooled_continuous.vcf.gz "${OUT}"/*.pooled_continuous.vcf.gz.tbi
+    rm -f "${OUT}"/*.chimerism.txt "${OUT}"/*.chi_pooled.txt "${OUT}"/read_bin_rescue_manifest.tsv
+    rm -rf "${OUT}"/em_refine "${ASM_ROOT}/${SPEC}"
+}
+
+seed_binning_from_reuse_root () {
+    local SPEC="$1"
+    local OUT="$2"
+    [[ -n "$REUSE_BINNING_ROOT" ]] || return 0
+
+    local SRC="${REUSE_BINNING_ROOT}/${SPEC}"
+    local MARKER="${OUT}/.reuse_binning_seeded"
+    if [[ -f "$MARKER" && $SKIP_DONE -eq 1 \
+        && -s "${OUT}/${SPEC}.uniq.R1.fq.gz" \
+        && -s "${OUT}/${SPEC}.uniq.R2.fq.gz" \
+        && -s "${OUT}/${SPEC}.map_database.bam" \
+        && -s "${OUT}/A.R1.fq.gz" ]]; then
+        echo "[skip] reused binning cache already seeded from $REUSE_BINNING_ROOT"
+        if [[ "$REUSE_BINNING_CLEAN_DOWNSTREAM" == "1" ]]; then
+            clean_reuse_downstream_outputs "$SPEC" "$OUT"
+            date > "$MARKER"
+        fi
+        return 0
+    fi
+    [[ -d "$SRC" ]] || { echo "[ERROR] reuse source missing: $SRC" >&2; exit 1; }
+    [[ -s "${SRC}/${SPEC}.uniq.R1.fq.gz" ]] || { echo "[ERROR] source uniq R1 missing: ${SRC}/${SPEC}.uniq.R1.fq.gz" >&2; exit 1; }
+    [[ -s "${SRC}/${SPEC}.uniq.R2.fq.gz" ]] || { echo "[ERROR] source uniq R2 missing: ${SRC}/${SPEC}.uniq.R2.fq.gz" >&2; exit 1; }
+    [[ -s "${SRC}/${SPEC}.map_database.bam" ]] || { echo "[ERROR] source DB BAM missing: ${SRC}/${SPEC}.map_database.bam" >&2; exit 1; }
+    [[ -s "${SRC}/A.R1.fq.gz" ]] || { echo "[ERROR] source per-gene FASTQs missing under $SRC" >&2; exit 1; }
+
+    echo "[step] seed dedup/db-map/gene-bin cache from $SRC"
+    mkdir -p "$OUT"
+    cp -a "${SRC}/${SPEC}.uniq.R1.fq.gz" "${SRC}/${SPEC}.uniq.R2.fq.gz" "$OUT/"
+    cp -a "${SRC}/${SPEC}.map_database.bam" "$OUT/"
+    [[ -s "${SRC}/${SPEC}.map_database.bam.bai" ]] && cp -a "${SRC}/${SPEC}.map_database.bam.bai" "$OUT/"
+    [[ -s "${SRC}/header.sam" ]] && cp -a "${SRC}/header.sam" "$OUT/"
+
+    local fq
+    for fq in "${SRC}"/*.R1.fq.gz "${SRC}"/*.R2.fq.gz; do
+        [[ -e "$fq" ]] || continue
+        case "$(basename "$fq")" in
+            "${SPEC}.uniq.R1.fq.gz"|"${SPEC}.uniq.R2.fq.gz") continue ;;
+        esac
+        cp -a "$fq" "$OUT/"
+    done
+
+    if [[ "$REUSE_BINNING_CLEAN_DOWNSTREAM" == "1" ]]; then
+        clean_reuse_downstream_outputs "$SPEC" "$OUT"
+    fi
+    date > "$MARKER"
+}
+
 # Read gene.bed; suffix dup gene names with _2,_3
 declare -a CHROMS STARTS ENDS GENES TAGS
 declare -A SEEN
@@ -153,6 +295,8 @@ run_one_sample () {
     echo "  FQ2=$FQ2"
     echo "  OUT=$OUT"
     echo "===================================================="
+
+    seed_binning_from_reuse_root "$SPEC" "$OUT"
 
     # ---- 0. dedupe read names ----
     local UFQ1="${OUT}/${SPEC}.uniq.R1.fq.gz"
@@ -189,12 +333,58 @@ run_one_sample () {
             -b "$DB_BAM" -nm 2
     fi
 
+    if [[ "$READ_BIN_RESCUE" == "1" ]]; then
+        local RB_MANIFEST="${OUT}/read_bin_rescue_manifest.tsv"
+        if [[ -f "$RB_MANIFEST" && $SKIP_DONE -eq 1 ]]; then
+            echo "[skip] read-bin rescue already ran"
+        else
+            echo "[step] rescue full-FASTQ reads missed by strict gene binning"
+            local RB_GENE_ARGS=()
+            for gx in $READ_BIN_RESCUE_GENES; do RB_GENE_ARGS+=(--gene "$gx"); done
+            local RB_BACKGROUND_GENE_ARGS=()
+            for gx in $READ_BIN_RESCUE_BACKGROUND_GENES; do RB_BACKGROUND_GENE_ARGS+=(--background-gene "$gx"); done
+            local RB_MATE_ARGS=()
+            if [[ "$READ_BIN_RESCUE_REQUIRE_BOTH_MATES" == "1" ]]; then
+                RB_MATE_ARGS+=(--require-both-mates)
+            fi
+            local RB_RETENTION_ARGS=()
+            if [[ "$READ_BIN_RESCUE_RETENTION_GATE" == "1" ]]; then
+                RB_RETENTION_ARGS+=(
+                    --retention-gate
+                    --retention-min-full-pairs "$READ_BIN_RESCUE_RETENTION_MIN_FULL_PAIRS"
+                    --retention-max-retained-fraction "$READ_BIN_RESCUE_RETENTION_MAX_RETAINED_FRAC"
+                    --retention-min-missing-fraction "$READ_BIN_RESCUE_RETENTION_MIN_MISSING_FRAC"
+                    --retention-min-rescue-pairs "$READ_BIN_RESCUE_RETENTION_MIN_RESCUE_PAIRS"
+                )
+            fi
+            "$PYBIN" -u "$READ_BIN_RESCUE_PY" \
+                --fq1 "$UFQ1" --fq2 "$UFQ2" \
+                --fq-dir "$OUT" \
+                --exon-dir "${SPECHLA_DB}/HLA/exon" \
+                --k "$READ_BIN_RESCUE_K" \
+                --min-hits "$READ_BIN_RESCUE_MIN_HITS" \
+                --min-margin "$READ_BIN_RESCUE_MIN_MARGIN" \
+                --min-mate-hits "$READ_BIN_RESCUE_MIN_MATE_HITS" \
+                --max-rescue-fraction "$READ_BIN_RESCUE_MAX_FRAC" \
+                --max-rescue-pairs "$READ_BIN_RESCUE_MAX_PAIRS" \
+                --manifest "$RB_MANIFEST" \
+                "${RB_GENE_ARGS[@]}" \
+                "${RB_BACKGROUND_GENE_ARGS[@]}" \
+                "${RB_MATE_ARGS[@]}" \
+                "${RB_RETENTION_ARGS[@]}"
+        fi
+    fi
+
     # ---- 2. per-gene bwa to SpecHLA per-gene refs ----
     local HLAS=(A B C DPB1 DQB1 DRB1)
     local GROUP="@RG\tID:${SPEC}\tSM:${SPEC}"
-    bwa mem -U 10000 -L 10000,10000 -R "$GROUP" \
-        "$HLA_REF" "$UFQ1" "$UFQ2" 2>/dev/null \
-        | samtools view -H - > "${OUT}/header.sam" || true
+    if [[ -s "${OUT}/header.sam" && $SKIP_DONE -eq 1 ]]; then
+        echo "[skip] ${OUT}/header.sam exists"
+    else
+        bwa mem -U 10000 -L 10000,10000 -R "$GROUP" \
+            "$HLA_REF" "$UFQ1" "$UFQ2" 2>/dev/null \
+            | samtools view -H - > "${OUT}/header.sam" || true
+    fi
     for hla in "${HLAS[@]}"; do
         local PER_BAM="${OUT}/${hla}.bam"
         if [[ -f "$PER_BAM" && $SKIP_DONE -eq 1 ]]; then
@@ -308,7 +498,7 @@ PYEOF
             "$PYBIN" "${SCRIPTS_DIR}/estimate_chi_pooled.py" "$PC_VCF" > "$PC_LOG" 2>&1 || true
             cat "$PC_LOG"
             local CHI_R_PC
-            CHI_R_PC=$(awk '/^GLOBAL chi_R=/{split($2,a,"="); print a[2]; exit}' "$PC_LOG")
+            CHI_R_PC=$(awk '/^GLOBAL[[:space:]]+chi_R=/{for(i=1;i<=NF;i++)if($i~/^chi_R=/){split($i,a,"=");print a[2];exit}}' "$PC_LOG")
             if [[ -n "$CHI_R_PC" ]] && awk -v x="$CHI_R_PC" 'BEGIN{exit !(x>0 && x<0.5)}'; then
                 echo "[chi] pooled-continuous chi_R=$CHI_R_PC (overrides GT-based $CHI_R)"
                 CHI_R="$CHI_R_PC"
@@ -418,7 +608,7 @@ run_em_refine () {
     CHI_R=$(awk '/chi_R=/{for(i=1;i<=NF;i++)if($i~/^chi_R=/){split($i,a,"=");print a[2]}}' "$CHIM_LOG" 2>/dev/null || echo "")
     if [[ "${USE_POOLED_CHI:-1}" -eq 1 && -f "$PC_LOG" ]]; then
         local CHI_R_PC
-        CHI_R_PC=$(awk '/^GLOBAL chi_R=/{split($2,a,"="); print a[2]; exit}' "$PC_LOG" 2>/dev/null || echo "")
+        CHI_R_PC=$(awk '/^GLOBAL[[:space:]]+chi_R=/{for(i=1;i<=NF;i++)if($i~/^chi_R=/){split($i,a,"=");print a[2];exit}}' "$PC_LOG" 2>/dev/null || echo "")
         if [[ -n "$CHI_R_PC" ]] && awk -v x="$CHI_R_PC" 'BEGIN{exit !(x>0 && x<0.5)}'; then
             echo "[em-refine] using pooled-continuous chi_R=$CHI_R_PC (was $CHI_R)"
             CHI_R="$CHI_R_PC"
@@ -443,6 +633,12 @@ run_em_refine () {
             --rescue-min-count "$EM_REFINE_RESCUE_MIN_COUNT"
             --rescue-max-frac "$EM_REFINE_RESCUE_MAX_FRAC")
     fi
+    if [[ "$EM_REFINE_LOW_RECIPIENT_PRIVATE_RESCUE" == "1" ]]; then
+        RESCUE_ARGS+=(--low-recipient-private-rescue
+            --low-recipient-private-genes "$EM_REFINE_LOW_RECIPIENT_PRIVATE_GENES"
+            --low-recipient-private-max-frac "$EM_REFINE_LOW_RECIPIENT_PRIVATE_MAX_FRAC"
+            --low-recipient-private-dose-ratio "$EM_REFINE_LOW_RECIPIENT_PRIVATE_DOSE_RATIO")
+    fi
     echo "[step] EM iterative remap (chi_R=$CHI_R, max-diff=$EM_REFINE_MAX_DIFF)"
     "$PYBIN" -u "$EM_REFINE_PY" \
         --sample "$SPEC" \
@@ -450,6 +646,7 @@ run_em_refine () {
         --chi-r "$CHI_R" \
         --imgt "$DB_PREFIX" \
         --out-dir "$EM_OUT" \
+        --baseline-root "${ASM_ROOT}/${SPEC}" \
         --threads "$THREADS" \
         "${CHI_ARGS[@]}" \
         "${RESCUE_ARGS[@]}" \
@@ -464,25 +661,161 @@ run_em_refine () {
         local TAG_LC; TAG_LC=$(echo "$TAG" | tr '[:upper:]' '[:lower:]')
         local SUMM="${EM_OUT}/${gx}.summary.tsv"
         local EM_CALLS="${EM_OUT}/${gx}.calls.tsv"
+        local TF_COUNTS="${EM_OUT}/${gx}.tf_counts.tsv"
         local DST="${ASM_ROOT}/${SPEC}/${TAG_LC}/${TAG}/calls.tsv"
         if [[ ! -f "$SUMM" || ! -f "$EM_CALLS" || ! -f "$DST" ]]; then
             echo "[em-refine] $gx: missing inputs (em or baseline); skip"
             continue
         fi
-        local DIFF
-        DIFF=$(awk 'NR==2{print $2}' "$SUMM")
-        local KEEP
-        KEEP=$(awk -v d="$DIFF" -v t="$EM_REFINE_MAX_DIFF" 'BEGIN{print (d+0 < t+0) ? 1 : 0}')
-        if [[ "$KEEP" == "1" ]]; then
+        local GATE GATE_ACTION GATE_REASON
+        GATE=$("$PYBIN" "$EM_REFINE_GATE_PY" \
+            --gene "$gx" \
+            --gene-dir "${ASM_ROOT}/${SPEC}/${TAG_LC}/${TAG}" \
+            --summary "$SUMM" \
+            --em-calls "$EM_CALLS" \
+            --baseline-calls "$DST" \
+            --tf-counts "$TF_COUNTS" \
+            --max-diff "$EM_REFINE_MAX_DIFF" \
+            --high-mask "$EM_REFINE_GATE_HIGH_MASK" \
+            --ambiguous-diff "$EM_REFINE_GATE_AMBIG_DIFF" \
+            --ambiguous-top-frac "$EM_REFINE_GATE_AMBIG_TOP" \
+            --selected-min-frac "$EM_REFINE_GATE_SELECTED_MIN_FRAC" \
+            --baseline-min-frac "$EM_REFINE_GATE_BASELINE_MIN_FRAC" \
+            --baseline-near-tie "$EM_REFINE_GATE_BASELINE_NEAR_TIE" \
+            --class-i-baseline-genes "$EM_REFINE_GATE_CLASS_I_BASELINE_GENES" \
+            --class-i-baseline-diff "$EM_REFINE_GATE_CLASS_I_BASELINE_DIFF" \
+            --class-i-baseline-top-frac "$EM_REFINE_GATE_CLASS_I_BASELINE_TOP" \
+            --gene-max-diff "$EM_REFINE_GATE_GENE_MAX_DIFF" \
+            --gene-high-mask "$EM_REFINE_GATE_GENE_HIGH_MASK" \
+            --gene-ambiguous-diff "$EM_REFINE_GATE_GENE_AMBIG_DIFF" \
+            --gene-ambiguous-top-frac "$EM_REFINE_GATE_GENE_AMBIG_TOP" \
+            --gene-selected-min-frac "$EM_REFINE_GATE_GENE_SELECTED_MIN_FRAC" \
+            --gene-baseline-min-frac "$EM_REFINE_GATE_GENE_BASELINE_MIN_FRAC" \
+            --gene-baseline-near-tie "$EM_REFINE_GATE_GENE_BASELINE_NEAR_TIE")
+        GATE_ACTION=${GATE%%$'\t'*}
+        GATE_REASON=${GATE#*$'\t'}
+        if [[ "$GATE_ACTION" == "OVERRIDE" ]]; then
             if [[ ! -f "${DST%.tsv}.baseline.tsv" ]]; then
                 cp "$DST" "${DST%.tsv}.baseline.tsv"
             fi
-            cp "$EM_CALLS" "$DST"
-            echo "[em-refine] $gx: sumAbsDiff=$DIFF < $EM_REFINE_MAX_DIFF -> OVERRIDE (baseline saved)"
+            cp "$EM_CALLS" "${DST}.tmp.$$"
+            mv "${DST}.tmp.$$" "$DST"
+            echo "[em-refine] $gx: $GATE_REASON -> OVERRIDE (baseline saved)"
         else
-            echo "[em-refine] $gx: sumAbsDiff=$DIFF >= $EM_REFINE_MAX_DIFF -> KEEP baseline"
+            echo "[em-refine] $gx: $GATE_REASON -> KEEP baseline"
         fi
     done
+}
+
+run_direct_constrained_gate () {
+    local SPEC="$1"
+    [[ "$DIRECT_CONSTRAINED_GATE" == "1" ]] || return 0
+    if [[ "$EM_REFINE" != "1" ]]; then
+        echo "[direct-gate] EM_REFINE=0; constrained direct gate needs em_refine outputs, skip"
+        return 0
+    fi
+
+    local OUT="${OUT_ROOT}/${SPEC}"
+    local FINAL="${ASM_ROOT}/${SPEC}/${SPEC}.final_calls.tsv"
+    if [[ ! -f "$FINAL" ]]; then
+        echo "[direct-gate] missing final calls before gate: $FINAL; skip"
+        return 0
+    fi
+
+    local DIRECT_TSV="${OUT}/direct_constrained_gate.tsv"
+    local DIRECT_FAIL="${OUT}/direct_constrained_gate.fail.tsv"
+    local DIRECT_MANIFEST="${OUT}/direct_constrained_gate_manifest.tsv"
+    local SAM_CACHE="${OUT}/direct_constrained_sam_cache"
+    local GENE_ARGS=()
+    for gx in $DIRECT_CONSTRAINED_GATE_GENES; do GENE_ARGS+=(--gene "$gx"); done
+
+    if [[ $SKIP_DONE -eq 1 && -s "$DIRECT_TSV" ]]; then
+        echo "[direct-gate] skip direct likelihood; $DIRECT_TSV exists"
+    else
+        echo "[step] constrained direct-likelihood gate scan (gap>=$DIRECT_CONSTRAINED_GATE_GAP)"
+        "$PYBIN" -u "$DIRECT_CONSTRAINED_BATCH_PY" \
+            --sample "$SPEC" \
+            --spechla-root "$OUT_ROOT" \
+            --asm-root "$ASM_ROOT" \
+            --out-tsv "$DIRECT_TSV" \
+            --fail-tsv "$DIRECT_FAIL" \
+            --sam-cache-dir "$SAM_CACHE" \
+            --threads "$THREADS" \
+            --min-as-frac "$DIRECT_CONSTRAINED_GATE_MIN_AS_FRAC" \
+            --direct-top-n "$DIRECT_CONSTRAINED_GATE_TOP_N" \
+            --direct-min-frac "$DIRECT_CONSTRAINED_GATE_MIN_FRAC" \
+            --direct-family-agg "$DIRECT_CONSTRAINED_GATE_FAMILY_AGG" \
+            "${GENE_ARGS[@]}" || {
+                echo "[direct-gate] likelihood scan failed; leaving current calls intact"
+                return 0
+            }
+    fi
+
+    echo "[step] apply constrained direct-likelihood gate"
+    "$PYBIN" -u "$DIRECT_CONSTRAINED_APPLY_PY" \
+        --direct-tsv "$DIRECT_TSV" \
+        --in-asm-root "$ASM_ROOT" \
+        --in-place \
+        --spechla-root "$OUT_ROOT" \
+        --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
+        --gap-threshold "$DIRECT_CONSTRAINED_GATE_GAP" \
+        --manifest "$DIRECT_MANIFEST" || {
+            echo "[direct-gate] apply failed; leaving current calls intact"
+            return 0
+        }
+}
+
+run_class2_joint_rescue () {
+    local SPEC="$1"
+    [[ "$CLASS2_JOINT_RESCUE" == "1" ]] || return 0
+    if [[ "$EM_REFINE" != "1" ]]; then
+        echo "[class2-joint] EM_REFINE=0; class-II joint rescue needs em_refine outputs, skip"
+        return 0
+    fi
+
+    local OUT="${OUT_ROOT}/${SPEC}"
+    local FINAL="${ASM_ROOT}/${SPEC}/${SPEC}.final_calls.tsv"
+    if [[ ! -f "$FINAL" ]]; then
+        echo "[class2-joint] missing final calls before rescue: $FINAL; skip"
+        return 0
+    fi
+
+    local MANIFEST="${OUT}/class2_joint_rescue_manifest.tsv"
+    local COMMON_MINOR_ARGS=()
+    if [[ "$CLASS2_JOINT_DPB1_COMMON_MINOR" == "1" ]]; then
+        COMMON_MINOR_ARGS+=(--dpb1-common-minor
+            --dpb1-common-minor-max-number "$CLASS2_JOINT_DPB1_COMMON_MINOR_MAX_NUMBER"
+            --dpb1-common-minor-min-fraction "$CLASS2_JOINT_DPB1_COMMON_MINOR_MIN_FRAC"
+            --dpb1-common-minor-max-fraction "$CLASS2_JOINT_DPB1_COMMON_MINOR_MAX_FRAC"
+            --dpb1-common-minor-min-weight "$CLASS2_JOINT_DPB1_COMMON_MINOR_MIN_WEIGHT"
+            --dpb1-common-minor-top "$CLASS2_JOINT_DPB1_COMMON_MINOR_TOP")
+    fi
+    local ABSOLUTE_COMMON_ARGS=()
+    if [[ "$CLASS2_JOINT_DPB1_ABSOLUTE_COMMON" == "1" ]]; then
+        ABSOLUTE_COMMON_ARGS+=(--dpb1-absolute-common
+            --dpb1-absolute-common-max-number "$CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MAX_NUMBER"
+            --dpb1-absolute-common-min-weight "$CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MIN_WEIGHT"
+            --dpb1-absolute-common-min-fraction "$CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MIN_FRAC"
+            --dpb1-absolute-common-min-ratio "$CLASS2_JOINT_DPB1_ABSOLUTE_COMMON_MIN_RATIO")
+    fi
+    echo "[step] class-II joint rescue (DRB1-DQB1 LD + DPB1 rare/common-minor rescue)"
+    "$PYBIN" -u "$CLASS2_JOINT_RESCUE_PY" \
+        --sample "$SPEC" \
+        --in-asm-root "$ASM_ROOT" \
+        --in-place \
+        --spechla-root "$OUT_ROOT" \
+        --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
+        --manifest "$MANIFEST" \
+        --drb1-min-mask "$CLASS2_JOINT_DRB1_MIN_MASK" \
+        --dpb1-min-mask "$CLASS2_JOINT_DPB1_MIN_MASK" \
+        --dpb1-rare-cutoff "$CLASS2_JOINT_DPB1_RARE_CUTOFF" \
+        --dpb1-min-fraction "$CLASS2_JOINT_DPB1_MIN_FRAC" \
+        --dpb1-top-common "$CLASS2_JOINT_DPB1_TOP_COMMON" \
+        "${COMMON_MINOR_ARGS[@]}" \
+        "${ABSOLUTE_COMMON_ARGS[@]}" || {
+            echo "[class2-joint] rescue failed; leaving current calls intact"
+            return 0
+        }
 }
 
 for entry in "${SAMPLES_FQ[@]}"; do
@@ -511,6 +844,9 @@ for entry in "${SAMPLES_FQ[@]}"; do
         --asm-root "$ASM_ROOT" --sample "$S" --out "$FINAL" \
         --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
         && echo "[FINAL] ${S}: ${FINAL}"
+
+    run_direct_constrained_gate "$S"
+    run_class2_joint_rescue "$S"
 done
 
 echo "[INFO] All samples processed."

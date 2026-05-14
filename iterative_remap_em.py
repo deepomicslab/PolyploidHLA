@@ -173,7 +173,8 @@ def run_em(reads, contigs, n_iter=300, tol=1e-6, T=2.0):
 
 def fit_4hap(counts, chi_r, top_n=14, min_frac=0.005,
              per_gene_chi=False, chi_lo=0.005, chi_hi=0.5,
-             chi_step=0.005, chi_prior_lambda=0.0):
+             chi_step=0.005, chi_prior_lambda=0.0,
+             force_names=None, force_quartets=None):
     """Search the best (R1,R2,D1,D2) 2-field quartet under a chimerism dose
     model. If per_gene_chi=True, also search chi_r on a grid for each quartet
     and add a soft L1 prior |chi - chi_global|*lambda so the per-gene fit
@@ -183,8 +184,16 @@ def fit_4hap(counts, chi_r, top_n=14, min_frac=0.005,
     Score is sum |obs - exp| (+ prior penalty when per_gene_chi)."""
     total = sum(counts.values())
     if total == 0: return None, float("inf"), chi_r
-    items = sorted(counts.items(), key=lambda kv: -kv[1])[:top_n]
-    items = [(c, n) for c, n in items if n / total > min_frac]
+    force_names = set(force_names or [])
+    force_quartets = list(force_quartets or [])
+    items_by_name = dict(sorted(counts.items(), key=lambda kv: -kv[1])[:top_n])
+    for name in force_names:
+        if name in counts:
+            items_by_name[name] = counts[name]
+        else:
+            items_by_name[name] = 0.0
+    items = [(c, n) for c, n in items_by_name.items()
+             if n / total > min_frac or c in force_names]
     if len(items) < 2: return None, float("inf"), chi_r
     obs_frac = {c: n / total for c, n in items}
     names = [c for c, _ in items]
@@ -193,9 +202,17 @@ def fit_4hap(counts, chi_r, top_n=14, min_frac=0.005,
     else:
         chi_grid = np.array([chi_r])
     best = None
-    for R1, R2, D1, D2 in itertools.product(names, repeat=4):
+    quartet_iter = itertools.product(names, repeat=4)
+    seen_quartets = set()
+    for R1, R2, D1, D2 in itertools.chain(quartet_iter, force_quartets):
         if (R1, R2) > (R2, R1): continue
         if (D1, D2) > (D2, D1): continue
+        if any(name not in names for name in (R1, R2, D1, D2)):
+            continue
+        key = (R1, R2, D1, D2)
+        if key in seen_quartets:
+            continue
+        seen_quartets.add(key)
         # Build per-candidate (a, b) so that exp[c] = a[c] + b[c]*chi
         nR = defaultdict(int); nD = defaultdict(int)
         for hap, side in ((R1,"R"),(R2,"R"),(D1,"D"),(D2,"D")):
@@ -218,8 +235,165 @@ def fit_4hap(counts, chi_r, top_n=14, min_frac=0.005,
     return best
 
 
+def logsumexp(vals):
+    if not vals:
+        return -float("inf")
+    m = max(vals)
+    if not math.isfinite(m):
+        return m
+    return m + math.log(sum(math.exp(v - m) for v in vals))
+
+
+def quartet_l1_score(counts, quartet, chi_r):
+    total = sum(counts.values())
+    if total == 0 or not quartet:
+        return float("inf")
+    names = set(counts) | set(quartet)
+    obs = {c: counts.get(c, 0.0) / total for c in names}
+    nR = defaultdict(int); nD = defaultdict(int)
+    for hap, side in zip(quartet, ["R", "R", "D", "D"]):
+        (nR if side == "R" else nD)[hap] += 1
+    diff = 0.0
+    for c in names:
+        exp = nR[c] * chi_r / 2.0 + nD[c] * (1.0 - chi_r) / 2.0
+        diff += abs(obs.get(c, 0.0) - exp)
+    return diff
+
+
+def reads_to_tf_logweights(reads, safe2name, T=2.0, family_agg="max"):
+    rows = []
+    for lst in reads.values():
+        if not lst:
+            continue
+        mx = max(a for _, a in lst)
+        per_tf = defaultdict(list)
+        for c, a in lst:
+            if c not in safe2name:
+                continue
+            per_tf[two_field(safe2name[c])].append((a - mx) / T)
+        if not per_tf:
+            continue
+        if family_agg == "logsum":
+            rows.append({tf: logsumexp(vs) for tf, vs in per_tf.items()})
+        else:
+            rows.append({tf: max(vs) for tf, vs in per_tf.items()})
+    return rows
+
+
+def fit_4hap_read_likelihood(reads, safe2name, counts, chi_r, top_n=12,
+                             min_frac=0.002, per_gene_chi=False,
+                             chi_lo=0.005, chi_hi=0.5, chi_step=0.01,
+                             chi_prior_lambda=0.0, dose_prior_lambda=0.0, T=2.0,
+                             log_floor=-25.0, force_names=None,
+                             force_quartets=None, family_agg="max"):
+    """Search a quartet by direct read likelihood.
+
+    Each read contributes log(sum_h dose_h * P(read|allele_h)), using BWA AS
+    differences as relative log-likelihoods. This keeps multi-mapping
+    uncertainty at read level instead of first collapsing it into EM fractions.
+    Returns ((R1,R2,D1,D2), nll, chi, gap_to_second).
+    """
+    total = sum(counts.values())
+    if total == 0:
+        return None, float("inf"), chi_r, 0.0
+    force_names = set(force_names or [])
+    force_quartets = list(force_quartets or [])
+    items_by_name = dict(sorted(counts.items(), key=lambda kv: -kv[1])[:top_n])
+    for name in force_names:
+        items_by_name.setdefault(name, counts.get(name, 0.0))
+    names = [c for c, n in items_by_name.items()
+             if n / total > min_frac or c in force_names]
+    if len(names) < 2:
+        return None, float("inf"), chi_r, 0.0
+    rows = reads_to_tf_logweights(reads, safe2name, T=T, family_agg=family_agg)
+    if not rows:
+        return None, float("inf"), chi_r, 0.0
+    name_to_idx = {name: i for i, name in enumerate(names)}
+    row_mat = np.full((len(rows), len(names)), log_floor, dtype=np.float64)
+    for r, row in enumerate(rows):
+        for tf, logw in row.items():
+            idx = name_to_idx.get(tf)
+            if idx is not None:
+                row_mat[r, idx] = logw
+    chi_grid = (np.arange(chi_lo, chi_hi + 1e-9, chi_step)
+                if per_gene_chi else np.array([chi_r]))
+    pairs = list(itertools.combinations_with_replacement(names, 2))
+    quartet_iter = itertools.chain(
+        ((r1, r2, d1, d2) for r1, r2 in pairs for d1, d2 in pairs),
+        (q for q in force_quartets if q),
+    )
+    seen = set()
+    best = None
+    second_nll = float("inf")
+    n_reads = len(rows)
+    for quartet in quartet_iter:
+        if any(name not in names for name in quartet):
+            continue
+        if quartet in seen:
+            continue
+        seen.add(quartet)
+        for chi in chi_grid:
+            weights = defaultdict(float)
+            weights[quartet[0]] += chi / 2.0
+            weights[quartet[1]] += chi / 2.0
+            weights[quartet[2]] += (1.0 - chi) / 2.0
+            weights[quartet[3]] += (1.0 - chi) / 2.0
+            idxs = []
+            log_weights = []
+            for tf, w in weights.items():
+                if w > 0:
+                    idxs.append(name_to_idx[tf])
+                    log_weights.append(math.log(w))
+            sub = row_mat[:, idxs] + np.asarray(log_weights, dtype=np.float64)[None, :]
+            mx = sub.max(axis=1)
+            ll = float(np.sum(mx + np.log(np.exp(sub - mx[:, None]).sum(axis=1))))
+            nll = -ll
+            if chi_prior_lambda > 0:
+                nll += chi_prior_lambda * n_reads * abs(float(chi) - chi_r)
+            if dose_prior_lambda > 0:
+                nll += dose_prior_lambda * n_reads * quartet_l1_score(
+                    counts, quartet, float(chi)
+                )
+            if best is None or nll < best[1]:
+                if best is not None:
+                    second_nll = best[1]
+                best = (quartet, float(nll), float(chi))
+            elif nll < second_nll:
+                second_nll = float(nll)
+    if best is None:
+        return None, float("inf"), chi_r, 0.0
+    gap = second_nll - best[1] if math.isfinite(second_nll) else float("inf")
+    return best[0], best[1], best[2], gap
+
+
 def has_expression_suffix(two_field_name):
     return bool(two_field_name and two_field_name[-1].isalpha() and two_field_name[-1] != "G")
+
+
+def read_baseline_quartet(path):
+    """Read a calls.tsv-shaped baseline file and return 2-field R1,R2,D1,D2."""
+    if not path or not os.path.exists(path):
+        return None
+    rows = []
+    with open(path) as fh:
+        header = fh.readline().rstrip("\n").split("\t")
+        try:
+            i_h = header.index("global_hap")
+            i_a = header.index("assignment")
+            i_l = header.index("allele")
+        except ValueError:
+            return None
+        for line in fh:
+            f = line.rstrip("\n").split("\t")
+            if len(f) <= max(i_h, i_a, i_l):
+                continue
+            rows.append((f[i_h], f[i_a], two_field(f[i_l])))
+    rows.sort(key=lambda r: int(r[0]) if str(r[0]).isdigit() else r[0])
+    rs = [a for _h, side, a in rows if side == "R"]
+    ds = [a for _h, side, a in rows if side == "D"]
+    if len(rs) < 2 or len(ds) < 2:
+        return None
+    return tuple(rs[:2] + ds[:2])
 
 
 def rescue_recipient_minor(counts, winners, chi_r, min_frac=0.001,
@@ -260,6 +434,74 @@ def rescue_recipient_minor(counts, winners, chi_r, min_frac=0.001,
     return rescued, detail
 
 
+def quartet_residual_from_counts(counts, quartet, chi_r):
+    total = sum(counts.values()) or 1.0
+    exp = defaultdict(float)
+    for allele in quartet[:2]:
+        exp[allele] += chi_r / 2.0
+    for allele in quartet[2:4]:
+        exp[allele] += (1.0 - chi_r) / 2.0
+    names = set(counts) | set(exp)
+    return sum(abs(counts.get(name, 0.0) / total - exp.get(name, 0.0)) for name in names)
+
+
+def collapse_low_recipient_private(counts, winners, chi_r, max_frac=0.02,
+                                   dose_ratio=0.20, top_n=4):
+    """Replace unsupported recipient-private alleles with supported shared alleles.
+
+    Some genes, especially HLA-C in these mixtures, have high-confidence top
+    alleles but the dosage fit can spend a recipient slot on a tiny private
+    allele to shave residual. A recipient-private allele with far less support
+    than a single recipient haplotype dose is unlikely to be real; try replacing
+    it with a donor/top allele only when that improves the same dosage residual.
+    """
+    if not winners or chi_r <= 0 or chi_r >= 0.5:
+        return winners, None, None
+    total = sum(counts.values()) or 1.0
+    recipient_single_dose = chi_r / 2.0
+    q = list(winners)
+    donor_set = set(q[2:4])
+    candidates = []
+    for allele in list(q[2:4]) + [name for name, _count in sorted(counts.items(), key=lambda kv: -kv[1])[:top_n]]:
+        if allele not in candidates:
+            candidates.append(allele)
+    changed = []
+    current_residual = quartet_residual_from_counts(counts, q, chi_r)
+    for idx in (0, 1):
+        allele = q[idx]
+        if allele in donor_set:
+            continue
+        frac = counts.get(allele, 0.0) / total
+        if frac >= max_frac or frac >= dose_ratio * recipient_single_dose:
+            continue
+        best_q = None
+        best_replacement = None
+        best_residual = current_residual
+        for replacement in candidates:
+            if replacement == allele:
+                continue
+            trial = list(q)
+            trial[idx] = replacement
+            residual = quartet_residual_from_counts(counts, trial, chi_r)
+            if residual < best_residual - 1e-9:
+                best_q = trial
+                best_replacement = replacement
+                best_residual = residual
+        if best_q is None:
+            continue
+        changed.append((allele, best_replacement, frac, recipient_single_dose))
+        q = best_q
+        donor_set = set(q[2:4])
+        current_residual = best_residual
+    if not changed:
+        return winners, None, None
+    detail = ", ".join(
+        f"{old}->{new} frac={frac:.4f} recipient_single={dose:.4f}"
+        for old, new, frac, dose in changed
+    )
+    return tuple(q), detail, current_residual
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sample", required=True)
@@ -297,7 +539,34 @@ def main():
     ap.add_argument("--rescue-min-frac", type=float, default=0.001)
     ap.add_argument("--rescue-min-count", type=float, default=20.0)
     ap.add_argument("--rescue-max-frac", type=float, default=0.08)
+    ap.add_argument("--baseline-root", default=None,
+                    help="sample assembly root containing <gene-lower>/<gene>/calls.tsv; "
+                    "baseline alleles are forced into the EM quartet candidate pool")
+    ap.add_argument("--low-recipient-private-rescue", action="store_true",
+                    help="collapse very low-support recipient-private alleles to supported shared alleles")
+    ap.add_argument("--low-recipient-private-genes", default="HLA-C",
+                    help="comma-separated genes where low recipient-private rescue is enabled")
+    ap.add_argument("--low-recipient-private-max-frac", type=float, default=0.02)
+    ap.add_argument("--low-recipient-private-dose-ratio", type=float, default=0.20)
+    ap.add_argument("--direct-quartet-likelihood", action="store_true",
+                    help="choose the 4-hap quartet by direct read-level likelihood instead of EM-fraction L1")
+    ap.add_argument("--direct-top-n", type=int, default=12,
+                    help="top-N 2-field alleles considered by direct read-level likelihood")
+    ap.add_argument("--direct-min-frac", type=float, default=-1.0,
+                    help="minimum EM fraction for direct likelihood candidates; <0 reuses --min-frac")
+    ap.add_argument("--direct-log-floor", type=float, default=-25.0,
+                    help="relative log-likelihood assigned when a read lacks an alignment to a quartet allele")
+    ap.add_argument("--direct-per-gene-chi", action="store_true",
+                    help="grid-search chi_r for direct read-level likelihood")
+    ap.add_argument("--direct-chi-step", type=float, default=0.01)
+    ap.add_argument("--direct-chi-prior", type=float, default=0.0,
+                    help="NLL prior weight per read on |chi_direct - chi_global|")
+    ap.add_argument("--direct-dose-prior", type=float, default=0.0,
+                    help="NLL prior weight per read on EM dose L1 for direct likelihood quartets")
+    ap.add_argument("--direct-family-agg", choices=["max", "logsum"], default="max",
+                    help="how to aggregate sub-allele alignments into a 2-field read likelihood")
     args = ap.parse_args()
+    low_private_genes = {g.strip() for g in args.low_recipient_private_genes.split(",") if g.strip()}
     os.makedirs(args.out_dir, exist_ok=True)
     print(f"loading IMGT db: {args.imgt}", flush=True)
     db = load_imgt(args.imgt)
@@ -362,15 +631,52 @@ def main():
         print(f"  --- rolled to 2-field (top 10) ---", flush=True)
         for tf, n in sorted(tf_counts.items(), key=lambda kv: -kv[1])[:10]:
             print(f"    {tf}: weight={n:.1f} ({n/total*100:.2f}%)")
+        with open(os.path.join(args.out_dir, f"{g}.tf_counts.tsv"), "w") as fh:
+            fh.write("allele_2field\tem_weight\tfraction\n")
+            for tf, n in sorted(tf_counts.items(), key=lambda kv: -kv[1]):
+                fh.write(f"{tf}\t{n:.4f}\t{n/total:.8f}\n")
+        baseline_quartet = None
+        if args.baseline_root:
+            baseline_path = os.path.join(args.baseline_root, g.lower(), g, "calls.tsv")
+            baseline_quartet = read_baseline_quartet(baseline_path)
+            if baseline_quartet:
+                print("  baseline quartet candidate: " + ", ".join(baseline_quartet), flush=True)
         best, diff, fit_chi = fit_4hap(
             dict(tf_counts), args.chi_r,
             top_n=args.top_n, min_frac=args.min_frac,
             per_gene_chi=args.per_gene_chi,
             chi_lo=args.chi_lo, chi_hi=args.chi_hi, chi_step=args.chi_step,
             chi_prior_lambda=args.chi_prior,
+            force_names=set(baseline_quartet or []),
+            force_quartets=[baseline_quartet] if baseline_quartet else None,
         )
         if best is None:
             print("  fit failed", flush=True); continue
+        if args.direct_quartet_likelihood:
+            direct_min_frac = args.min_frac if args.direct_min_frac < 0 else args.direct_min_frac
+            direct_best, direct_nll, direct_chi, direct_gap = fit_4hap_read_likelihood(
+                reads, safe2name, dict(tf_counts), args.chi_r,
+                top_n=args.direct_top_n, min_frac=direct_min_frac,
+                per_gene_chi=args.direct_per_gene_chi,
+                chi_lo=args.chi_lo, chi_hi=args.chi_hi,
+                chi_step=args.direct_chi_step,
+                chi_prior_lambda=args.direct_chi_prior,
+                dose_prior_lambda=args.direct_dose_prior,
+                T=args.em_T,
+                log_floor=args.direct_log_floor,
+                force_names=set(baseline_quartet or []),
+                force_quartets=[baseline_quartet] if baseline_quartet else None,
+                family_agg=args.direct_family_agg,
+            )
+            if direct_best is not None:
+                best = direct_best
+                fit_chi = direct_chi
+                diff = quartet_l1_score(dict(tf_counts), best, fit_chi)
+                print(f"  direct read-likelihood: nll={direct_nll:.2f} "
+                      f"gap={direct_gap:.2f} chi_R_fit={fit_chi:.3f} "
+                      f"l1={diff:.3f}", flush=True)
+            else:
+                print("  direct read-likelihood failed; keeping EM-fraction L1 fit", flush=True)
         winners = list(best)  # already 2-field strings
         rescue_detail = None
         if args.recipient_minor_rescue:
@@ -381,11 +687,23 @@ def main():
                 max_frac=args.rescue_max_frac,
             )
             winners = list(rescued)
+        low_private_detail = None
+        if args.low_recipient_private_rescue and g in low_private_genes:
+            collapsed, low_private_detail, collapsed_diff = collapse_low_recipient_private(
+                dict(tf_counts), tuple(winners), fit_chi,
+                max_frac=args.low_recipient_private_max_frac,
+                dose_ratio=args.low_recipient_private_dose_ratio,
+            )
+            winners = list(collapsed)
+            if collapsed_diff is not None:
+                diff = collapsed_diff
         print(f"  best 4-hap (sumAbsDiff={diff:.3f}, chi_R_fit={fit_chi:.3f}):")
         print(f"    R1={winners[0]}  R2={winners[1]}  "
               f"D1={winners[2]}  D2={winners[3]}", flush=True)
         if rescue_detail:
             print(f"  recipient-minor rescue: {rescue_detail}", flush=True)
+        if low_private_detail:
+            print(f"  low-recipient-private rescue: {low_private_detail}", flush=True)
         with open(os.path.join(args.out_dir, f"{g}.iterative.tsv"), "w") as fh:
             fh.write("global_hap\tassignment\tallele_2field\tem_weight\n")
             for i, (nm, side) in enumerate(zip(winners, ["R","R","D","D"]), 1):
