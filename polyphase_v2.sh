@@ -842,6 +842,7 @@ for entry in "${SAMPLES_FQ[@]}"; do
     FINAL="${ASM_ROOT}/${S}/${S}.final_calls.tsv"
     "$PYBIN" "${SCRIPTS_DIR}/aggregate_calls.py" \
         --asm-root "$ASM_ROOT" --sample "$S" --out "$FINAL" \
+        --spechla-root "$OUT_ROOT" \
         --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
         && echo "[FINAL] ${S}: ${FINAL}"
 

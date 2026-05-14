@@ -413,7 +413,7 @@ def proposals_for_sample(asm_root: Path, spechla_root: Path, sample: str, args):
     return rows, proposals
 
 
-def aggregate_sample(asm_root: Path, sample: str, genes, g_group: Path) -> None:
+def aggregate_sample(asm_root: Path, sample: str, genes, g_group: Path, spechla_root: Path | None = None) -> None:
     argv = [
         "aggregate_calls.py",
         "--asm-root", str(asm_root),
@@ -422,6 +422,8 @@ def aggregate_sample(asm_root: Path, sample: str, genes, g_group: Path) -> None:
         "--genes", *genes,
         "--out", str(asm_root / sample / f"{sample}.final_calls.tsv"),
     ]
+    if spechla_root is not None:
+        argv.extend(["--spechla-root", str(spechla_root)])
     old_argv = sys.argv
     try:
         sys.argv = argv
@@ -527,7 +529,7 @@ def main() -> None:
 
     if not args.dry_run:
         for sample in sorted({proposal["sample"] for proposal in all_proposals}):
-            aggregate_sample(out_asm_root, sample, args.genes, args.g_group)
+            aggregate_sample(out_asm_root, sample, args.genes, args.g_group, args.spechla_root)
             mark_final_rows(out_asm_root / sample / f"{sample}.final_calls.tsv", accepted_keys)
 
     if args.manifest:

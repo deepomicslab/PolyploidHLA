@@ -139,7 +139,7 @@ def accepted_direct_rows(path: Path, gap_threshold: float):
     return accepted
 
 
-def aggregate_sample(asm_root: Path, sample: str, genes, g_group: Path) -> None:
+def aggregate_sample(asm_root: Path, sample: str, genes, g_group: Path, spechla_root: Path | None = None) -> None:
     argv = [
         "aggregate_calls.py",
         "--asm-root", str(asm_root),
@@ -148,6 +148,8 @@ def aggregate_sample(asm_root: Path, sample: str, genes, g_group: Path) -> None:
         "--genes", *genes,
         "--out", str(asm_root / sample / f"{sample}.final_calls.tsv"),
     ]
+    if spechla_root is not None:
+        argv.extend(["--spechla-root", str(spechla_root)])
     old_argv = sys.argv
     try:
         sys.argv = argv
@@ -234,7 +236,7 @@ def main() -> None:
 
     if not args.dry_run:
         for sample in samples:
-            aggregate_sample(out_asm_root, sample, args.genes, args.g_group)
+            aggregate_sample(out_asm_root, sample, args.genes, args.g_group, args.spechla_root)
             mark_final_rows(out_asm_root / sample / f"{sample}.final_calls.tsv", accepted_keys)
 
     manifest = args.manifest or (out_asm_root / "direct_constrained_gate_manifest.tsv")

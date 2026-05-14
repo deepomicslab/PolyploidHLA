@@ -6,12 +6,13 @@ a single tab-separated file. The full allele calls are preserved, and extra
 2-field, G group, and report columns are emitted for low-resolution / G group
 truth comparison and low-coverage genes.
 
-    sample  gene  R1_full  R2_full  D1_full  D2_full  R1_fraction ...
+    sample  gene  R1_full  R2_full  D1_full  D2_full  R1_fraction  R1_read_fraction ...
 
 `R1_fraction`/`R2_fraction`/`D1_fraction`/`D2_fraction` are the modelled
-haplotype proportions for each reported call. `source` is `em-refined` if a
-`calls.baseline.tsv` sibling exists (meaning the EM stage overrode the
-baseline), otherwise `baseline`.
+haplotype proportions for each reported call. `R1_read_fraction` etc. are the
+allele-family read support fractions from EM `tf_counts.tsv` when available.
+`source` is `em-refined` if a `calls.baseline.tsv` sibling exists (meaning the
+EM stage overrode the baseline), otherwise `baseline`.
 
 Usage:
     aggregate_calls.py --asm-root asm_v2 --sample mySample \\
@@ -135,6 +136,36 @@ def read_calls(path: Path):
     return rows
 
 
+def read_tsv_dicts(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open() as handle:
+        header = handle.readline().rstrip("\n").split("\t")
+        if not header or header == [""]:
+            return []
+        rows = []
+        for line in handle:
+            parts = line.rstrip("\n").split("\t")
+            rows.append({name: parts[idx] if idx < len(parts) else "" for idx, name in enumerate(header)})
+        return rows
+
+
+def load_read_support(spechla_root: Optional[Path], sample: str, gene: str) -> dict[str, dict[str, str]]:
+    if spechla_root is None:
+        return {}
+    path = spechla_root / sample / "em_refine" / f"{gene}.tf_counts.tsv"
+    support = {}
+    for row in read_tsv_dicts(path):
+        allele = row.get("allele_2field", "")
+        if not allele:
+            continue
+        support[allele] = {
+            "read_count": row.get("em_weight", "NA"),
+            "read_fraction": row.get("fraction", "NA"),
+        }
+    return support
+
+
 def call_value(row: Optional[dict], key: str, default: str = "NA") -> str:
     if not row:
         return default
@@ -155,7 +186,29 @@ def call_fraction(row: Optional[dict]) -> str:
     return "NA"
 
 
-def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap):
+def format_float(value: str, digits: int) -> str:
+    if value in {"", "NA", None}:
+        return "NA"
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def call_read_support(row: Optional[dict], allele: str, support: dict[str, dict[str, str]]) -> tuple[str, str]:
+    if row:
+        row_fraction = row.get("allele_read_fraction") or row.get("read_fraction")
+        row_count = row.get("allele_read_count") or row.get("read_count")
+        if row_fraction or row_count:
+            return format_float(row_fraction or "NA", 6), format_float(row_count or "NA", 2)
+    allele_support = support.get(allele_2field(allele), {})
+    return (
+        format_float(allele_support.get("read_fraction", "NA"), 6),
+        format_float(allele_support.get("read_count", "NA"), 2),
+    )
+
+
+def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap, spechla_root: Optional[Path] = None):
     out_rows = []
     for gene in genes:
         gene_lc = gene.lower()
@@ -169,10 +222,15 @@ def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap):
                 "sample": sample, "gene": gene,
                 "R1_full": "NA", "R2_full": "NA", "D1_full": "NA", "D2_full": "NA",
                 "R1_fraction": "NA", "R2_fraction": "NA", "D1_fraction": "NA", "D2_fraction": "NA",
+                "R1_read_fraction": "NA", "R2_read_fraction": "NA",
+                "D1_read_fraction": "NA", "D2_read_fraction": "NA",
+                "R1_read_count": "NA", "R2_read_count": "NA",
+                "D1_read_count": "NA", "D2_read_count": "NA",
                 "source": "missing", "mean_mask_fraction": "NA",
                 "report_level": "missing", "warning": "missing_calls_tsv",
             })
             continue
+        read_support = load_read_support(spechla_root, sample, gene)
         rows = read_calls(calls)
         r_rows = [row for row in rows if row.get("assignment") == "R"]
         d_rows = [row for row in rows if row.get("assignment") == "D"]
@@ -182,6 +240,8 @@ def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap):
         ds = [call_value(row, "allele") for row in d_rows]
         rf = [call_fraction(row) for row in r_rows]
         df = [call_fraction(row) for row in d_rows]
+        r_support = [call_read_support(row, allele, read_support) for row, allele in zip(r_rows, rs)]
+        d_support = [call_read_support(row, allele, read_support) for row, allele in zip(d_rows, ds)]
         source = "em-refined" if (d / "calls.baseline.tsv").exists() else "baseline"
         high_mask = mean_mask is not None and mean_mask >= mask_warn
         report_level = "2-field" if high_mask else "full"
@@ -199,6 +259,10 @@ def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap):
             "D2_report": allele_2field(ds[1]) if high_mask else ds[1],
             "R1_fraction": rf[0], "R2_fraction": rf[1],
             "D1_fraction": df[0], "D2_fraction": df[1],
+            "R1_read_fraction": r_support[0][0], "R2_read_fraction": r_support[1][0],
+            "D1_read_fraction": d_support[0][0], "D2_read_fraction": d_support[1][0],
+            "R1_read_count": r_support[0][1], "R2_read_count": r_support[1][1],
+            "D1_read_count": d_support[0][1], "D2_read_count": d_support[1][1],
             "source": source,
             "mean_mask_fraction": "NA" if mean_mask is None else f"{mean_mask:.4f}",
             "report_level": report_level,
@@ -218,10 +282,12 @@ def main():
                     "are downgraded to 2-field")
     ap.add_argument("--g-group", type=Path, default=DEFAULT_G_GROUP,
                     help="WMDA hla_nom_g.txt used for G group conversion")
+    ap.add_argument("--spechla-root", type=Path, default=None,
+                    help="per-sample SpecHLA output root used to read EM tf_counts.tsv for allele read support")
     args = ap.parse_args()
 
     gmap = load_g_group(args.g_group)
-    rows = collect(args.asm_root, args.sample, args.genes, args.mask_warn, gmap)
+    rows = collect(args.asm_root, args.sample, args.genes, args.mask_warn, gmap, args.spechla_root)
     out_path = args.out or (args.asm_root / args.sample / f"{args.sample}.final_calls.tsv")
     cols = [
         "sample", "gene",
@@ -230,6 +296,8 @@ def main():
         "R1_g_group", "R2_g_group", "D1_g_group", "D2_g_group",
         "R1_report", "R2_report", "D1_report", "D2_report",
         "R1_fraction", "R2_fraction", "D1_fraction", "D2_fraction",
+        "R1_read_fraction", "R2_read_fraction", "D1_read_fraction", "D2_read_fraction",
+        "R1_read_count", "R2_read_count", "D1_read_count", "D2_read_count",
         "source", "mean_mask_fraction", "report_level", "warning",
     ]
     out_path.parent.mkdir(parents=True, exist_ok=True)

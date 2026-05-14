@@ -86,6 +86,11 @@ The file keeps both high-resolution calls and conservative report calls:
   call. In the standard 2+2 chimerism model, R haplotypes are `chi_R / 2` each
   and D haplotypes are `(1 - chi_R) / 2` each; EM/direct modes use the fitted
   gene-specific chi when available.
+* `*_read_fraction`: allele-family read support fraction from EM read
+  assignment (`tf_counts.tsv`). This is not forced to R1/R2 or D1/D2 being
+  1:1 and can differ between two alleles from the same person.
+* `*_read_count`: EM-assigned effective read weight for the same 2-field allele
+  family.
 * `mean_mask_fraction`, `report_level`, `warning`: explain why a gene was
   reported at full vs. 2-field resolution.
 
@@ -191,12 +196,12 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
 * `<SAMPLE>.final_calls.tsv` columns:
   `sample | gene | R1_full | R2_full | D1_full | D2_full | R1_2field | ... |
   R1_g_group | ... | R1_report | ... | R1_fraction | R2_fraction |
-  D1_fraction | D2_fraction | source | mean_mask_fraction | report_level |
-  warning`.
+  D1_fraction | D2_fraction | R1_read_fraction | ... | R1_read_count | ... |
+  source | mean_mask_fraction | report_level | warning`.
 * Per-gene `calls.tsv` columns:
-  `global_hap | assignment(R/D) | allele | hap_fraction | em_weight` for
-  EM-refined calls, or `... | hap_fraction | total_assembly_score` for baseline
-  assembly calls.
+  `global_hap | assignment(R/D) | allele | hap_fraction |
+  allele_read_fraction | allele_read_count | em_weight` for EM-refined calls,
+  or `... | hap_fraction | total_assembly_score` for baseline assembly calls.
 
 If truth is available, evaluate with:
 
