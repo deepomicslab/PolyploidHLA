@@ -60,7 +60,7 @@ RECIPIENT_MAJOR=0 \
 bash polyphase_v2.sh
 ```
 
-**Final result — one file, all 6 genes:**
+**Final result — one file, six primary genes plus optional DRB345:**
 
 ```bash
 column -t asm_v2/mySample/mySample.final_calls.tsv
@@ -93,6 +93,19 @@ The file keeps both high-resolution calls and conservative report calls:
   family.
 * `mean_mask_fraction`, `report_level`, `warning`: explain why a gene was
   reported at full vs. 2-field resolution.
+
+When `DRB345_TYPING=1` (default), the pipeline also appends an `HLA-DRB345`
+row. This is not a seventh ordinary locus: it is a DRB1-linked add-on for the
+DRB3/DRB4/DRB5 genes. The add-on extracts read pairs with competitive DB
+support for DRB3/4/5, EM-remaps them to a combined DRB345 allele set, and uses
+the final DRB1 haplotypes to decide whether each R1/R2/D1/D2 haplotype should
+carry DRB3, DRB4, DRB5, or no DRB345 gene. It does not change the six primary
+gene calls. DRB345 DB-read extraction accepts bowtie2-style alignment scores,
+where the best score is often 0 and imperfect hits are negative. If the DRB1
+row is high-mask / low-confidence, the add-on switches to an evidence-first
+mode: long locus-unique k-mers decide which DRB3/4/5 loci have credible support,
+then EM allele fractions are fit to the R/R/D/D dose model without hard DRB1
+linkage. This lets DRB345 remain callable when DRB1 itself is unreliable.
 
 The per-gene FASTAs (`hap{1..4}.fa`) and raw `calls.tsv` are still kept under
 `asm_v2/<SAMPLE>/<gene_lc>/<HLA-X>/` for inspection.
@@ -191,6 +204,7 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
     read_bin_rescue_manifest.tsv      rescue counts, retention gate, final status
     class2_joint_rescue_manifest.tsv  guarded class-II rescue audit trail
     em_refine/<gene>.{calls,summary,iterative}.tsv
+    drb345/                          DRB3/4/5 linked add-on typing outputs
 ```
 
 * `<SAMPLE>.final_calls.tsv` columns:
@@ -202,6 +216,9 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
   `global_hap | assignment(R/D) | allele | hap_fraction |
   allele_read_fraction | allele_read_count | em_weight` for EM-refined calls,
   or `... | hap_fraction | total_assembly_score` for baseline assembly calls.
+  DRB345 add-on calls are stored under
+  `asm_v2/<SAMPLE>/hla-drb345/HLA-DRB345/calls.tsv` with an extra
+  `drb1_linked_locus` column.
 
 If truth is available, evaluate with:
 

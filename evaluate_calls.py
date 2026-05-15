@@ -64,6 +64,31 @@ def clean_allele(allele: str) -> str:
     return f"{gene}*{':'.join(fields)}"
 
 
+def normalize_truth_gene_allele(gene_short: str, allele: str):
+    gene_short = gene_short.strip()
+    allele = allele.strip()
+    if gene_short in {"DRB345", "DPB345"}:
+        if not allele or allele in {"NA", "-", "."}:
+            return "HLA-DRB345", "NA"
+        allele = allele.replace("HLA-", "")
+        if allele.startswith(("DRB3*", "DRB4*", "DRB5*")):
+            return "HLA-DRB345", allele
+        if "*" in allele:
+            return "HLA-DRB345", allele
+        fields = [field for field in allele.rstrip(":").split(":") if field]
+        if not fields:
+            return "HLA-DRB345", "NA"
+        locus_code = fields[0]
+        locus = {"03": "DRB3", "3": "DRB3", "04": "DRB4", "4": "DRB4", "05": "DRB5", "5": "DRB5"}.get(locus_code)
+        if locus and len(fields) >= 2:
+            return "HLA-DRB345", f"{locus}*{':'.join(fields[1:])}"
+        return "HLA-DRB345", f"DRB345*{allele}"
+    gene = f"HLA-{gene_short}"
+    if "*" in allele:
+        return gene, allele.replace("HLA-", "")
+    return gene, f"{gene_short}*{allele}"
+
+
 def norm_allele(allele: str, level: str, gmap=None) -> str:
     allele = clean_allele(allele)
     if allele == "NA" or "*" not in allele:
@@ -126,11 +151,8 @@ def load_truth(path: Path):
     for row in rows[1:]:
         side = row[0]
         for gene_short, allele in zip(header, row[1:]):
-            gene = f"HLA-{gene_short}"
-            if "*" in allele:
-                truth[side][gene].append(allele.replace("HLA-", ""))
-            else:
-                truth[side][gene].append(f"{gene_short}*{allele}")
+            gene, normalized = normalize_truth_gene_allele(gene_short, allele)
+            truth[side][gene].append(normalized)
     return truth
 
 

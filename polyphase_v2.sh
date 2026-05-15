@@ -150,6 +150,20 @@ EXON_TYPING=${EXON_TYPING:-1}
 EXON_TYPING_GENES=${EXON_TYPING_GENES:-"HLA-DRB1 HLA-DPB1 HLA-DQB1"}
 EXON_TYPING_PY=${EXON_TYPING_PY:-${SCRIPTS_DIR}/exon_typing_from_haps.py}
 
+# Optional DRB345 add-on typing. DRB345 is a reporting group for DRB3/DRB4/DRB5,
+# constrained by the final DRB1 haplotypes and emitted as an extra diagnostic row
+# in <sample>.final_calls.tsv after the main six-gene calls are finalized.
+DRB345_TYPING=${DRB345_TYPING:-1}
+DRB345_TYPING_PY=${DRB345_TYPING_PY:-${SCRIPTS_DIR}/type_drb345.py}
+DRB345_SUBS_PER_2FIELD=${DRB345_SUBS_PER_2FIELD:-5}
+DRB345_TOP_PER_LOCUS=${DRB345_TOP_PER_LOCUS:-8}
+DRB345_DB_MIN_AS_FRAC=${DRB345_DB_MIN_AS_FRAC:-0.90}
+DRB345_DB_MIN_AS=${DRB345_DB_MIN_AS:--100000000}
+DRB345_REMAP_MIN_AS_FRAC=${DRB345_REMAP_MIN_AS_FRAC:-0.95}
+DRB345_EVIDENCE_K=${DRB345_EVIDENCE_K:-71}
+DRB345_MIN_LOCUS_UNIQUE_FRAC=${DRB345_MIN_LOCUS_UNIQUE_FRAC:--1}
+DRB345_DRB1_UNTRUSTED_MASK=${DRB345_DRB1_UNTRUSTED_MASK:-0.50}
+
 # Optional post-aggregate constrained direct-likelihood gate. This is off by
 # default; when enabled it only searches quartets made from current/baseline
 # alleles and applies changes with a high likelihood-gap threshold.
@@ -818,6 +832,46 @@ run_class2_joint_rescue () {
         }
 }
 
+run_drb345_typing () {
+    local SPEC="$1"
+    [[ "$DRB345_TYPING" == "1" ]] || return 0
+    local OUT="${OUT_ROOT}/${SPEC}"
+    local FINAL="${ASM_ROOT}/${SPEC}/${SPEC}.final_calls.tsv"
+    local DB_BAM="${OUT}/${SPEC}.map_database.bam"
+    if [[ ! -s "$FINAL" ]]; then
+        echo "[drb345] missing final calls: $FINAL; skip"
+        return 0
+    fi
+    if [[ ! -s "$DB_BAM" ]]; then
+        echo "[drb345] missing DB BAM: $DB_BAM; skip"
+        return 0
+    fi
+    if [[ -f "${OUT}/drb345/HLA-DRB345.manifest.tsv" && $SKIP_DONE -eq 1 ]] \
+        && awk -F'\t' 'NR>1 && $2=="HLA-DRB345" {found=1} END{exit !found}' "$FINAL"; then
+        echo "[skip] DRB345 typing already ran and final row exists"
+        return 0
+    fi
+    echo "[step] DRB345 linked add-on typing"
+    "$PYBIN" -u "$DRB345_TYPING_PY" \
+        --sample "$SPEC" \
+        --fq-dir "$OUT" \
+        --db-bam "$DB_BAM" \
+        --asm-root "$ASM_ROOT" \
+        --final-calls "$FINAL" \
+        --imgt "$DB_PREFIX" \
+        --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
+        --threads "$THREADS" \
+        --subs-per-2field "$DRB345_SUBS_PER_2FIELD" \
+        --top-per-locus "$DRB345_TOP_PER_LOCUS" \
+        --db-min-as-frac "$DRB345_DB_MIN_AS_FRAC" \
+        --db-min-as "$DRB345_DB_MIN_AS" \
+        --remap-min-as-frac "$DRB345_REMAP_MIN_AS_FRAC" \
+        --evidence-k "$DRB345_EVIDENCE_K" \
+        --min-locus-unique-frac "$DRB345_MIN_LOCUS_UNIQUE_FRAC" \
+        --drb1-untrusted-mask "$DRB345_DRB1_UNTRUSTED_MASK" \
+        || echo "[drb345] typing failed; continuing with main calls"
+}
+
 for entry in "${SAMPLES_FQ[@]}"; do
     IFS='|' read -r S F1 F2 <<<"$entry"
     run_one_sample "$S" "$F1" "$F2"
@@ -848,6 +902,7 @@ for entry in "${SAMPLES_FQ[@]}"; do
 
     run_direct_constrained_gate "$S"
     run_class2_joint_rescue "$S"
+    run_drb345_typing "$S"
 done
 
 echo "[INFO] All samples processed."
