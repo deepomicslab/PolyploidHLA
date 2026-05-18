@@ -91,8 +91,22 @@ The file keeps both high-resolution calls and conservative report calls:
   1:1 and can differ between two alleles from the same person.
 * `*_read_count`: EM-assigned effective read weight for the same 2-field allele
   family.
+* `*_copy_fraction_fit`: fitted copy-level fraction for each R1/R2/D1/D2 slot.
+  These four values sum to 1 when read support is available. The fit minimizes
+  allele-family read-support error under `x >= 0` and `sum(x)=1`, using the
+  sample/gene chi as a weak regularizer when duplicated alleles make the copy
+  split underdetermined.
+* `copy_fit_error`, `copy_identifiability`, `copy_chi_r`, and
+  `allele_support_fraction_sum`: diagnostics for the copy-fraction fit.
+  `boundary_zero` means the constrained fit placed one slot at zero because it
+  lacked independent support; it is not a filled missing value.
 * `mean_mask_fraction`, `report_level`, `warning`: explain why a gene was
   reported at full vs. 2-field resolution.
+
+The pipeline also writes a concise companion file,
+`<SAMPLE>.final_calls.compact.tsv`, with only the sample, gene, four reported
+alleles, four fitted copy fractions, and fit diagnostics. The original
+`<SAMPLE>.final_calls.tsv` remains the detailed result file.
 
 When `DRB345_TYPING=1` (default), the pipeline also appends an `HLA-DRB345`
 row. This is not a seventh ordinary locus: it is a DRB1-linked add-on for the
@@ -211,7 +225,13 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
   `sample | gene | R1_full | R2_full | D1_full | D2_full | R1_2field | ... |
   R1_g_group | ... | R1_report | ... | R1_fraction | R2_fraction |
   D1_fraction | D2_fraction | R1_read_fraction | ... | R1_read_count | ... |
-  source | mean_mask_fraction | report_level | warning`.
+  R1_copy_fraction_fit | ... | copy_fit_error | copy_identifiability |
+  copy_chi_r | allele_support_fraction_sum | source | mean_mask_fraction |
+  report_level | warning`.
+* `<SAMPLE>.final_calls.compact.tsv` columns:
+  `sample | gene | R1_allele | R1_copy_fraction | R2_allele |
+  R2_copy_fraction | D1_allele | D1_copy_fraction | D2_allele |
+  D2_copy_fraction | copy_identifiability | copy_fit_error`.
 * Per-gene `calls.tsv` columns:
   `global_hap | assignment(R/D) | allele | hap_fraction |
   allele_read_fraction | allele_read_count | em_weight` for EM-refined calls,
