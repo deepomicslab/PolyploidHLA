@@ -174,7 +174,7 @@ def run_em(reads, contigs, n_iter=300, tol=1e-6, T=2.0):
 def fit_4hap(counts, chi_r, top_n=14, min_frac=0.005,
              per_gene_chi=False, chi_lo=0.005, chi_hi=0.5,
              chi_step=0.005, chi_prior_lambda=0.0,
-             force_names=None, force_quartets=None):
+             force_names=None, force_quartets=None, restrict_names=None):
     """Search the best (R1,R2,D1,D2) 2-field quartet under a chimerism dose
     model. If per_gene_chi=True, also search chi_r on a grid for each quartet
     and add a soft L1 prior |chi - chi_global|*lambda so the per-gene fit
@@ -186,14 +186,18 @@ def fit_4hap(counts, chi_r, top_n=14, min_frac=0.005,
     if total == 0: return None, float("inf"), chi_r
     force_names = set(force_names or [])
     force_quartets = list(force_quartets or [])
-    items_by_name = dict(sorted(counts.items(), key=lambda kv: -kv[1])[:top_n])
+    restrict_names = set(restrict_names or [])
+    if restrict_names:
+        items_by_name = {name: counts.get(name, 0.0) for name in restrict_names}
+    else:
+        items_by_name = dict(sorted(counts.items(), key=lambda kv: -kv[1])[:top_n])
     for name in force_names:
         if name in counts:
             items_by_name[name] = counts[name]
         else:
             items_by_name[name] = 0.0
     items = [(c, n) for c, n in items_by_name.items()
-             if n / total > min_frac or c in force_names]
+             if n / total > min_frac or c in force_names or c in restrict_names]
     if len(items) < 2: return None, float("inf"), chi_r
     obs_frac = {c: n / total for c, n in items}
     names = [c for c, _ in items]
@@ -285,7 +289,8 @@ def fit_4hap_read_likelihood(reads, safe2name, counts, chi_r, top_n=12,
                              chi_lo=0.005, chi_hi=0.5, chi_step=0.01,
                              chi_prior_lambda=0.0, dose_prior_lambda=0.0, T=2.0,
                              log_floor=-25.0, force_names=None,
-                             force_quartets=None, family_agg="max"):
+                             force_quartets=None, family_agg="max",
+                             restrict_names=None):
     """Search a quartet by direct read likelihood.
 
     Each read contributes log(sum_h dose_h * P(read|allele_h)), using BWA AS
@@ -298,11 +303,15 @@ def fit_4hap_read_likelihood(reads, safe2name, counts, chi_r, top_n=12,
         return None, float("inf"), chi_r, 0.0
     force_names = set(force_names or [])
     force_quartets = list(force_quartets or [])
-    items_by_name = dict(sorted(counts.items(), key=lambda kv: -kv[1])[:top_n])
+    restrict_names = set(restrict_names or [])
+    if restrict_names:
+        items_by_name = {name: counts.get(name, 0.0) for name in restrict_names}
+    else:
+        items_by_name = dict(sorted(counts.items(), key=lambda kv: -kv[1])[:top_n])
     for name in force_names:
         items_by_name.setdefault(name, counts.get(name, 0.0))
     names = [c for c, n in items_by_name.items()
-             if n / total > min_frac or c in force_names]
+             if n / total > min_frac or c in force_names or c in restrict_names]
     if len(names) < 2:
         return None, float("inf"), chi_r, 0.0
     rows = reads_to_tf_logweights(reads, safe2name, T=T, family_agg=family_agg)
@@ -394,6 +403,40 @@ def read_baseline_quartet(path):
     if len(rs) < 2 or len(ds) < 2:
         return None
     return tuple(rs[:2] + ds[:2])
+
+def read_dpb1_rescue_candidates(path):
+    """Read DPB1 allele-family rescue candidates from a manifest file."""
+    if not path or not os.path.exists(path):
+        return set()
+    candidates = set()
+    rows = []
+    with open(path) as fh:
+        for raw in fh:
+            line = raw.rstrip("\n")
+            if not line:
+                continue
+            if line.startswith("#"):
+                parts = line[1:].strip().split("\t", 1)
+                if len(parts) == 2 and parts[0] == "candidate_families":
+                    for item in parts[1].split(","):
+                        item = item.strip()
+                        if item:
+                            candidates.add(item)
+                continue
+            rows.append(line)
+    if rows:
+        header = rows[0].split("\t")
+        for line in rows[1:]:
+            values = line.split("\t")
+            row = dict(zip(header, values))
+            if row.get("candidate") == "1" and row.get("family"):
+                candidates.add(row["family"])
+    return candidates
+
+def dpb1_rescue_manifest_path(args):
+    if args.dpb1_rescue_candidate_manifest:
+        return args.dpb1_rescue_candidate_manifest
+    return os.path.join(args.fq_dir, "dpb1_family_rescue_manifest.tsv")
 
 
 def rescue_recipient_minor(counts, winners, chi_r, min_frac=0.001,
@@ -542,6 +585,12 @@ def main():
     ap.add_argument("--baseline-root", default=None,
                     help="sample assembly root containing <gene-lower>/<gene>/calls.tsv; "
                     "baseline alleles are forced into the EM quartet candidate pool")
+    ap.add_argument("--dpb1-rescue-candidate-mode", choices=["auto", "off"], default="auto",
+                    help="for HLA-DPB1, constrain quartet search to baseline alleles plus "
+                    "candidate families from dpb1_family_rescue_manifest.tsv when present")
+    ap.add_argument("--dpb1-rescue-candidate-manifest", default=None,
+                    help="optional DPB1 family rescue manifest path; defaults to "
+                    "<fq-dir>/dpb1_family_rescue_manifest.tsv")
     ap.add_argument("--low-recipient-private-rescue", action="store_true",
                     help="collapse very low-support recipient-private alleles to supported shared alleles")
     ap.add_argument("--low-recipient-private-genes", default="HLA-C",
@@ -641,14 +690,26 @@ def main():
             baseline_quartet = read_baseline_quartet(baseline_path)
             if baseline_quartet:
                 print("  baseline quartet candidate: " + ", ".join(baseline_quartet), flush=True)
+        fit_force_names = set(baseline_quartet or [])
+        fit_restrict_names = set()
+        if g == "HLA-DPB1" and args.dpb1_rescue_candidate_mode != "off":
+            manifest_path = dpb1_rescue_manifest_path(args)
+            dpb1_rescue_candidates = read_dpb1_rescue_candidates(manifest_path)
+            if dpb1_rescue_candidates:
+                fit_restrict_names = set(fit_force_names) | dpb1_rescue_candidates
+                fit_force_names.update(dpb1_rescue_candidates)
+                print("  DPB1 rescue-constrained quartet candidates: "
+                      + ", ".join(sorted(fit_restrict_names))
+                      + f"  (manifest={manifest_path})", flush=True)
         best, diff, fit_chi = fit_4hap(
             dict(tf_counts), args.chi_r,
             top_n=args.top_n, min_frac=args.min_frac,
             per_gene_chi=args.per_gene_chi,
             chi_lo=args.chi_lo, chi_hi=args.chi_hi, chi_step=args.chi_step,
             chi_prior_lambda=args.chi_prior,
-            force_names=set(baseline_quartet or []),
+            force_names=fit_force_names,
             force_quartets=[baseline_quartet] if baseline_quartet else None,
+            restrict_names=fit_restrict_names,
         )
         if best is None:
             print("  fit failed", flush=True); continue
@@ -664,9 +725,10 @@ def main():
                 dose_prior_lambda=args.direct_dose_prior,
                 T=args.em_T,
                 log_floor=args.direct_log_floor,
-                force_names=set(baseline_quartet or []),
+                force_names=fit_force_names,
                 force_quartets=[baseline_quartet] if baseline_quartet else None,
                 family_agg=args.direct_family_agg,
+                restrict_names=fit_restrict_names,
             )
             if direct_best is not None:
                 best = direct_best
