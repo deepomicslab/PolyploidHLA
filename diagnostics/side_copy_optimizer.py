@@ -15,6 +15,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from evaluate_calls import load_g_group, normalize_for_display, overlap  # noqa: E402
@@ -342,7 +344,7 @@ def main() -> None:
     parser.add_argument("--chim-weight-vaf", type=float, default=200.0)
     parser.add_argument("--chim-perm-min-gain", type=float, default=20.0)
     parser.add_argument("--chim-rebal-min-gain", type=float, default=0.0)
-    parser.add_argument("--g-group", type=Path, default=SCRIPT_DIR / "resources" / "spechla" / "db" / "HLA" / "hla_nom_g.txt")
+    parser.add_argument("--g-group", type=Path, default=SCRIPT_ROOT / "resources" / "spechla" / "db" / "HLA" / "hla_nom_g.txt")
     parser.add_argument("--quartet-summary", type=Path, default=None,
                         help="Optional validation summary; truth used only for post-hoc scoring.")
     parser.add_argument("--out-validation", type=Path, default=None)

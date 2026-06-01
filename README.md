@@ -17,7 +17,7 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 | `reassign_gt_chimeric.py`   | χ-aware GT correction before phasing |
 | `estimate_chi_pooled.py`    | pooled-continuous χ_R estimator |
 | `iterative_remap_em.py`     | EM refinement (Salmon-style read remap) |
-| `rescue_gene_binned_reads.py` | validation-only read-bin rescue diagnostic/prototype |
+| `diagnostics/rescue_gene_binned_reads.py` | validation-only read-bin rescue diagnostic/prototype |
 | `apply_class2_joint_rescue.py` | guarded class-II post-aggregate rescue |
 | `em_refine_gate.py`         | per-gene EM override gate logic |
 | `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
@@ -27,7 +27,7 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 | `gene.spechla.bed`          | per-gene typing region on bundled `hla.ref.extend.fa` |
 | `resources/spechla/`        | bundled SpecHLA-derived helper scripts and HLA reference files |
 | `environment.yml`           | conda environment spec |
-| `octopus_to_imgt.py`, `caller_free_4hap.py` | rejected alternatives, kept for reference |
+| `diagnostics/` | offline diagnostics, validation runners, and rejected alternatives kept for reference |
 
 ---
 
@@ -167,7 +167,7 @@ Optional environment / database overrides:
 The options above cover the recommended user-facing settings.
 
 Read-bin rescue is currently a validation-only diagnostic, not part of the
-default production pipeline. Run `scripts/run_gendx_input_root_diagnostic.sh`
+default production pipeline. Run `scripts/diagnostics/run_gendx_input_root_diagnostic.sh`
 first to prove that strict gene binning is losing usable read evidence; only
 after a rerun shows accuracy gain should rescue be promoted into the main flow.
 

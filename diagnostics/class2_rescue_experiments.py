@@ -27,6 +27,8 @@ import numpy as np
 import pysam
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from caller_free_4hap import collect_obs_af, imgt_genotypes_at_sites, load_imgt, parse_bed  # noqa: E402

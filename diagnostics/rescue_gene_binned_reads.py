@@ -19,7 +19,8 @@ from typing import Iterable, Iterator, Tuple
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_EXON_DIR = SCRIPT_DIR / "resources" / "spechla" / "db" / "HLA" / "exon"
+SCRIPT_ROOT = SCRIPT_DIR.parent
+DEFAULT_EXON_DIR = SCRIPT_ROOT / "resources" / "spechla" / "db" / "HLA" / "exon"
 DEFAULT_GENES = ["HLA-A", "HLA-B", "HLA-C", "HLA-DRB1", "HLA-DPB1", "HLA-DQB1"]
 GENE_TO_SHORT = {
     "HLA-A": "A",

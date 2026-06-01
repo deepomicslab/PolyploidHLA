@@ -20,14 +20,16 @@ from typing import Iterable
 import pysam
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from hla_polyphase_assemble import _align_allele_to_ref, load_imgt_alleles  # noqa: E402
 
-DEFAULT_HLA_REF = SCRIPT_DIR / "resources" / "spechla" / "db" / "ref" / "hla.ref.extend.fa"
-DEFAULT_IMGT = SCRIPT_DIR / "resources" / "spechla" / "db" / "ref" / "hla_gen.format.filter.extend.DRB.no26789.v2.fasta"
-DEFAULT_GENE_BED = SCRIPT_DIR / "gene.spechla.bed"
-DEFAULT_TRUTH_DIR = SCRIPT_DIR.parent / "truth"
+DEFAULT_HLA_REF = SCRIPT_ROOT / "resources" / "spechla" / "db" / "ref" / "hla.ref.extend.fa"
+DEFAULT_IMGT = SCRIPT_ROOT / "resources" / "spechla" / "db" / "ref" / "hla_gen.format.filter.extend.DRB.no26789.v2.fasta"
+DEFAULT_GENE_BED = SCRIPT_ROOT / "gene.spechla.bed"
+DEFAULT_TRUTH_DIR = SCRIPT_ROOT.parent / "truth"
 DEFAULT_SPECHLA_ROOT = Path("/data2/wangxuedong/polyploid-hla-realsets/spechla_out_gendx_amp_abc_20260520")
 
 GENES = ["HLA-A", "HLA-B", "HLA-C", "HLA-DRB1", "HLA-DQB1", "HLA-DPB1"]

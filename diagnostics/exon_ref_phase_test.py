@@ -35,8 +35,9 @@ from typing import Iterable, Optional
 import pysam
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_BUNDLED_SPECHLA = SCRIPT_DIR / "resources" / "spechla"
-DEFAULT_LEGACY_SPECHLA = SCRIPT_DIR.parent / "SpecHLA"
+SCRIPT_ROOT = SCRIPT_DIR.parent
+DEFAULT_BUNDLED_SPECHLA = SCRIPT_ROOT / "resources" / "spechla"
+DEFAULT_LEGACY_SPECHLA = SCRIPT_ROOT.parent / "SpecHLA"
 DEFAULT_SPECHLA = Path(
     os.environ.get(
         "SPECHLA",
@@ -522,7 +523,7 @@ def aggregate(sample_out_root: Path, sample: str, genes: list[str], args) -> Pat
     out = sample_out_root / sample / f"{sample}.final_calls.tsv"
     cmd = [
         sys.executable,
-        str(SCRIPT_DIR / "aggregate_calls.py"),
+        str(SCRIPT_ROOT / "aggregate_calls.py"),
         "--asm-root", str(sample_out_root),
         "--sample", sample,
         "--genes", *genes,

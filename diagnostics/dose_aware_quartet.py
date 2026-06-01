@@ -45,6 +45,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 # Reuse the locus builder and helpers.

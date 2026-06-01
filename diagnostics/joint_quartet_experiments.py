@@ -20,6 +20,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from dose_aware_quartet import joint_residual, phase_residual  # noqa: E402
@@ -280,7 +282,7 @@ def main() -> None:
     rows = read_summary_rows(args.summary, args.sample, args.gene, args.max_rows)
     truths = {lab: load_truth(args.truth_dir / f"truth_typing-set-{lab}.tsv")
               for lab in ("a", "b", "c")}
-    gmap = load_g_group(SCRIPT_DIR / "resources" / "spechla" / "db" / "HLA" / "hla_nom_g.txt")
+    gmap = load_g_group(SCRIPT_ROOT / "resources" / "spechla" / "db" / "HLA" / "hla_nom_g.txt")
     args.out_prefix.parent.mkdir(parents=True, exist_ok=True)
     out_tsv = args.out_prefix.with_suffix(".tsv")
     fields = [

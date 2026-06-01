@@ -13,11 +13,13 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from hla_ld_maps import load_drb1_dqb1_map  # noqa: E402
 
-DEFAULT_DRB1_DQB1_LD_MAP = SCRIPT_DIR / "resources" / "drb1_dqb1_ld.tsv"
+DEFAULT_DRB1_DQB1_LD_MAP = SCRIPT_ROOT / "resources" / "drb1_dqb1_ld.tsv"
 
 
 def read_rows(path: Path):

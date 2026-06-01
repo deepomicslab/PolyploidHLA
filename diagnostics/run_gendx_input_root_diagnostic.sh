@@ -10,7 +10,7 @@ FQ_ROOT=${FQ_ROOT:-/data6/wangxuedong/polyploid_hla/fqs/amp/GenDx}
 SPECHLA_ROOT=${SPECHLA_ROOT:-/data2/wangxuedong/polyploid-hla-realsets/spechla_out_gendx_amp_abc_20260520}
 OUT_DIR=${OUT_DIR:-/data6/wangxuedong/polyploid_hla/diagnostics/gendx_input_root_diagnostic_noA4}
 PYBIN=${PYBIN:-python}
-SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXCLUDE_SAMPLES=${EXCLUDE_SAMPLES:-}
 GENES=${GENES:-"HLA-A HLA-B HLA-C HLA-DRB1 HLA-DPB1 HLA-DQB1"}
 

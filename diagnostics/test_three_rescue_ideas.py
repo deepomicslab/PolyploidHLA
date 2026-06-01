@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-ROOT = SCRIPT_DIR.parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+ROOT = SCRIPT_ROOT.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(ROOT))
 
@@ -289,7 +291,7 @@ def run_existing_root_test(current_rows, truth_by_set, gmap, out_dir: Path) -> N
 
 
 def run_dpb1_kmer_test(current_rows, truth_by_set, gmap, out_dir: Path) -> None:
-    unique_map, unique_counts = build_family_unique_kmers(SCRIPT_DIR / "resources" / "spechla" / "db" / "HLA" / "exon" / "HLA_DPB1.fasta", 31)
+    unique_map, unique_counts = build_family_unique_kmers(SCRIPT_ROOT / "resources" / "spechla" / "db" / "HLA" / "exon" / "HLA_DPB1.fasta", 31)
     trial = {sample: dict(rows_by_gene) for sample, rows_by_gene in current_rows.items()}
     manifest = []
     for sample, rows_by_gene in current_rows.items():

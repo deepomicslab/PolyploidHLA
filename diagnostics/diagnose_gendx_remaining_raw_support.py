@@ -17,7 +17,8 @@ from typing import Iterator
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_EXON_DIR = SCRIPT_DIR / "resources" / "spechla" / "db" / "HLA" / "exon"
+SCRIPT_ROOT = SCRIPT_DIR.parent
+DEFAULT_EXON_DIR = SCRIPT_ROOT / "resources" / "spechla" / "db" / "HLA" / "exon"
 GENE_SHORT = {
     "HLA-A": "A",
     "HLA-B": "B",

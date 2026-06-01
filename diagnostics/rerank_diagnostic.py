@@ -45,6 +45,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 from caller_free_4hap import (  # noqa: E402
     collect_obs_af, imgt_genotypes_at_sites, load_imgt, parse_bed)
@@ -369,7 +371,7 @@ def main() -> None:
         tp = args.truth_dir / f"truth_typing-{label}.tsv"
         if tp.exists():
             truths[label] = load_truth(tp)
-    gmap_path = SCRIPT_DIR / "resources" / "spechla" / "db" / "HLA" / "hla_nom_g.txt"
+    gmap_path = SCRIPT_ROOT / "resources" / "spechla" / "db" / "HLA" / "hla_nom_g.txt"
     gmap = load_g_group(gmap_path) if gmap_path.exists() else {}
 
     rows: List[Dict[str, str]] = []

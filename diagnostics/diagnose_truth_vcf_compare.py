@@ -18,6 +18,8 @@ from pathlib import Path
 import pysam
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from diagnose_truth_variants_called import (  # noqa: E402

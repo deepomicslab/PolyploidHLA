@@ -14,6 +14,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from hla_ld_maps import load_drb1_dqb1_map  # noqa: E402
@@ -24,7 +26,7 @@ DEFAULT_DIRECT = Path("diagnostics/direct_quartet_likelihood_classII_constrained
 DEFAULT_SPECHLA_ROOT = Path("/data2/wangxuedong/polyploid-hla-realsets/spechla_out_abc_realsets_rescue_20260512")
 DEFAULT_OUT_TSV = Path("diagnostics/class2_joint_rescue_20260513.tsv")
 DEFAULT_SUMMARY_OUT = Path("diagnostics/class2_joint_rescue_20260513.summary")
-DEFAULT_DRB1_DQB1_LD_MAP = SCRIPT_DIR / "resources" / "drb1_dqb1_ld.tsv"
+DEFAULT_DRB1_DQB1_LD_MAP = SCRIPT_ROOT / "resources" / "drb1_dqb1_ld.tsv"
 
 DIRECT_CLASS2_GENES = {"HLA-DRB1", "HLA-DQB1", "HLA-DPB1"}
 

@@ -15,8 +15,8 @@ SUMMARY=${SUMMARY:-${ROOT}/diagnostics/gendx_remaining_raw_support_after_combine
 PYBIN=${PYBIN:-python}
 
 cd "$ROOT"
-"$PYBIN" -m py_compile scripts/diagnose_gendx_remaining_raw_support.py
-"$PYBIN" scripts/diagnose_gendx_remaining_raw_support.py \
+"$PYBIN" -m py_compile scripts/diagnostics/diagnose_gendx_remaining_raw_support.py
+"$PYBIN" scripts/diagnostics/diagnose_gendx_remaining_raw_support.py \
     --quartet-summary "$QUARTET_SUMMARY" \
     --combined-manifest "$COMBINED_MANIFEST" \
     --fq-root "$FQ_ROOT" \

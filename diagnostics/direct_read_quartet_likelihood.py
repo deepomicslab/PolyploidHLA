@@ -21,12 +21,14 @@ from pathlib import Path
 from typing import Iterable
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from hla_polyphase_assemble import load_imgt_alleles  # noqa: E402
 
 
-DEFAULT_IMGT = SCRIPT_DIR / "resources" / "spechla" / "db" / "ref" / "hla_gen.format.filter.extend.DRB.no26789.v2.fasta"
+DEFAULT_IMGT = SCRIPT_ROOT / "resources" / "spechla" / "db" / "ref" / "hla_gen.format.filter.extend.DRB.no26789.v2.fasta"
 GENE_TO_SHORT = {
     "HLA-A": "A",
     "HLA-B": "B",

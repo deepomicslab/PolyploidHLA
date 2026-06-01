@@ -12,4 +12,5 @@ export VALID_SPECHLA_ROOT=${VALID_SPECHLA_ROOT:-${REALSETS}/spechla_out_gendx_am
 export VALID_ASM_ROOT=${VALID_ASM_ROOT:-${REALSETS}/asm_v2_gendx_amp_abc_mutect2_chi_count_strict_20260526}
 export DIAG_DIR=${DIAG_DIR:-${ROOT}/diagnostics/gendx_mutect2_chi_count_strict_20260526}
 
-exec bash "${ROOT}/scripts/run_gendx_gatk_ploidy4_validation.sh"
+DIAG_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec bash "${DIAG_SCRIPT_DIR}/run_gendx_gatk_ploidy4_validation.sh"

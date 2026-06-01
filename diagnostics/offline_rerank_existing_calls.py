@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-ROOT = SCRIPT_DIR.parent
+SCRIPT_ROOT = SCRIPT_DIR.parent
+ROOT = SCRIPT_ROOT.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(SCRIPT_ROOT))
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from aggregate_calls import DEFAULT_G_GROUP, SLOTS, allele_2field, allele_g_group, load_g_group  # noqa: E402
