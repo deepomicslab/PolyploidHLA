@@ -22,6 +22,7 @@ Requires: pysam, bcftools, samtools (in PATH); parasail (pip) or mappy.
 
 import argparse
 import itertools
+import math
 import os
 import shutil
 import subprocess
@@ -401,8 +402,23 @@ def _score_combo(block_scores, combo, perms24, penalty_per_block=None):
     return total, chosen_perms
 
 
+def _paired_combo_count(pool_size):
+    diploid_pairs = pool_size * (pool_size + 1) // 2
+    return diploid_pairs * diploid_pairs
+
+
+def _max_pool_for_paired_budget(max_paired_combos):
+    if max_paired_combos <= 0:
+        return None
+    pool_size = 0
+    while _paired_combo_count(pool_size + 1) <= max_paired_combos:
+        pool_size += 1
+    return pool_size
+
+
 def assemble_paired_diploid(block_scores, top_n_per_block=10, paired=True,
-                            global_pool_cap=30, penalty_per_block=None):
+                            global_pool_cap=30, penalty_per_block=None,
+                            max_paired_combos=0, max_wall_seconds=0):
     """
     If paired=True: hap{1,2}=recipient, hap{3,4}=donor; recipient and
         donor each can be homozygous (same allele x2).
@@ -429,6 +445,15 @@ def assemble_paired_diploid(block_scores, top_n_per_block=10, paired=True,
     if len(pool) > global_pool_cap:
         pool = sorted(pool, key=lambda n: -allele_global.get(n, 0.0))[:global_pool_cap]
         pool.sort()
+
+    if paired and max_paired_combos > 0:
+        budget_pool_cap = _max_pool_for_paired_budget(max_paired_combos)
+        if budget_pool_cap is not None and len(pool) > budget_pool_cap:
+            before = len(pool)
+            pool = sorted(pool, key=lambda n: -allele_global.get(n, 0.0))[:budget_pool_cap]
+            pool.sort()
+            print(f"  [budget] max paired combos={max_paired_combos} "
+                  f"caps pool {before}->{len(pool)}", flush=True)
     if len(pool) < 2:
         return None, None, float("-inf"), None
 
@@ -438,11 +463,18 @@ def assemble_paired_diploid(block_scores, top_n_per_block=10, paired=True,
     if paired:
         diploid_combos = [(a, b) for i, a in enumerate(pool) for b in pool[i:]]
         total_combos = len(diploid_combos) ** 2
+        if max_paired_combos > 0 and total_combos > max_paired_combos:
+            print(f"  [budget] paired combos {total_combos} exceed "
+                  f"max_paired_combos={max_paired_combos}; skip assembly",
+                  flush=True)
+            return None, None, float("-inf"), None
         print(f"  [assemble] pool={len(pool)} alleles, "
               f"diploid_pairs={len(diploid_combos)}, "
               f"combos to evaluate={total_combos}", flush=True)
         pbar = tqdm(total=total_combos, desc="  paired-assembly",
                     mininterval=1.0, unit="combo")
+        t_start = time.time()
+        timed_out = False
         for r in diploid_combos:
             for d in diploid_combos:
                 combo = (r[0], r[1], d[0], d[1])
@@ -451,6 +483,14 @@ def assemble_paired_diploid(block_scores, top_n_per_block=10, paired=True,
                 if total > best[0]:
                     best = (total, combo, perms)
                 pbar.update(1)
+                if max_wall_seconds > 0 and time.time() - t_start >= max_wall_seconds:
+                    timed_out = True
+                    break
+            if timed_out:
+                print(f"  [budget] paired assembly reached wall-clock budget "
+                      f"({max_wall_seconds}s); returning best evaluated combo",
+                      flush=True)
+                break
         pbar.close()
         assignment = {1: "R", 2: "R", 3: "D", 4: "D"}
     else:
@@ -679,6 +719,21 @@ def process_gene(chrom, gstart, gend, gene, args, ref, sample_name):
         print(f"[{gene}] no phased blocks; skip", flush=True)
         return
     print(f"[{gene}] {len(blocks_info)} block(s)", flush=True)
+    raw_cap = len(blocks_info)
+    if args.max_blocks > 0:
+        raw_cap = min(raw_cap, args.max_blocks)
+    if args.max_block_haps > 0:
+        raw_cap = min(raw_cap, max(1, args.max_block_haps // PLOIDY))
+    if raw_cap < len(blocks_info):
+        before = len(blocks_info)
+        blocks_info = sorted(
+            blocks_info,
+            key=lambda b: (len(b[3]), b[2] - b[1], -(b[1])),
+            reverse=True)[:raw_cap]
+        blocks_info = sorted(blocks_info, key=lambda b: (b[1], b[2]))
+        print(f"  [budget] kept top {len(blocks_info)}/{before} raw blocks "
+              f"(max_blocks={args.max_blocks}, max_block_haps={args.max_block_haps})",
+              flush=True)
 
     tmpdir = tempfile.mkdtemp(prefix=f"{gene}_", dir=args.out)
     try:
@@ -765,8 +820,29 @@ def process_gene(chrom, gstart, gend, gene, args, ref, sample_name):
             blocks_meta = [blocks_meta[i] for i in keep_idx]
             blocks_obs = [blocks_obs[i] for i in keep_idx]
 
+        block_hap_tasks = sum(len(haps) for haps in block_seqs)
+        post_cap = len(block_seqs)
+        if args.max_blocks > 0:
+            post_cap = min(post_cap, args.max_blocks)
+        if args.max_block_haps > 0:
+            avg_haps = max(1, int(math.ceil(block_hap_tasks / max(1, len(block_seqs)))))
+            post_cap = min(post_cap, max(1, args.max_block_haps // avg_haps))
+        if post_cap < len(block_seqs):
+            order = sorted(
+                range(len(block_seqs)),
+                key=lambda bi: (len(blocks_obs[bi]), blocks_meta[bi][1] - blocks_meta[bi][0], -blocks_meta[bi][0]),
+                reverse=True)[:post_cap]
+            order = sorted(order, key=lambda bi: blocks_meta[bi][0])
+            print(f"  [budget] kept top {len(order)}/{len(block_seqs)} usable blocks "
+                  f"(max_blocks={args.max_blocks}, max_block_haps={args.max_block_haps})",
+                  flush=True)
+            block_seqs = [block_seqs[i] for i in order]
+            blocks_meta = [blocks_meta[i] for i in order]
+            blocks_obs = [blocks_obs[i] for i in order]
+            block_hap_tasks = sum(len(haps) for haps in block_seqs)
+
         block_scores, score_rows = [], []
-        n_calls = sum(len(haps) for haps in block_seqs)
+        n_calls = block_hap_tasks
         # ref baseline: score(ref_slice, allele) per block; subtracted to
         # remove single-allele HLA_X ref bias.
         ref_baselines = [None] * len(block_seqs)
@@ -882,7 +958,9 @@ def process_gene(chrom, gstart, gend, gene, args, ref, sample_name):
             block_scores, top_n_per_block=args.top_n_per_block,
             paired=args.paired_diploids,
             global_pool_cap=args.global_pool_cap,
-            penalty_per_block=penalty_per_block)
+            penalty_per_block=penalty_per_block,
+            max_paired_combos=args.max_paired_combos,
+            max_wall_seconds=args.max_wall_seconds)
         if chosen is None:
             print(f"[{gene}] assembly failed", flush=True)
             return
@@ -988,6 +1066,18 @@ def main():
                     help="Drop blocks shorter than this many ref bp from scoring.")
     ap.add_argument("--min-block-variants", type=int, default=0,
                     help="Drop blocks with fewer phased het variants from scoring.")
+    ap.add_argument("--max-blocks", type=int, default=0,
+                    help="Skip assembly when usable block count exceeds this value "
+                         "(0 disables).")
+    ap.add_argument("--max-block-haps", type=int, default=0,
+                    help="Skip assembly when block x hap scoring tasks exceed this "
+                         "value (0 disables).")
+    ap.add_argument("--max-paired-combos", type=int, default=0,
+                    help="Cap paired-diploid search complexity by shrinking the "
+                         "allele pool if needed (0 disables).")
+    ap.add_argument("--max-wall-seconds", type=int, default=0,
+                    help="Return the best evaluated paired-diploid combo after this "
+                         "many seconds in assembly search (0 disables).")
     args = ap.parse_args()
 
     for tool in ("bcftools", "samtools"):

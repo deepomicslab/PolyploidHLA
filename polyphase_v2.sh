@@ -80,6 +80,19 @@ GT_DROP_FP_AF=${GT_DROP_FP_AF:-0.05}
 MASK_MIN_DEPTH=${MASK_MIN_DEPTH:-5}
 ASSEMBLE_ALIGNER=${ASSEMBLE_ALIGNER:-parasail}
 ASSEMBLE_PREFILTER_TOP=${ASSEMBLE_PREFILTER_TOP:-200}
+ASSEMBLE_TOP_N_PER_BLOCK=${ASSEMBLE_TOP_N_PER_BLOCK:-10}
+ASSEMBLE_GLOBAL_POOL_CAP=${ASSEMBLE_GLOBAL_POOL_CAP:-30}
+ASSEMBLE_MAX_BLOCKS=${ASSEMBLE_MAX_BLOCKS:-0}
+ASSEMBLE_MAX_BLOCK_HAPS=${ASSEMBLE_MAX_BLOCK_HAPS:-0}
+ASSEMBLE_MAX_PAIRED_COMBOS=${ASSEMBLE_MAX_PAIRED_COMBOS:-0}
+ASSEMBLE_MAX_WALL_SECONDS=${ASSEMBLE_MAX_WALL_SECONDS:-0}
+DPB1_ASSEMBLE_PREFILTER_TOP=${DPB1_ASSEMBLE_PREFILTER_TOP:-$ASSEMBLE_PREFILTER_TOP}
+DPB1_ASSEMBLE_TOP_N_PER_BLOCK=${DPB1_ASSEMBLE_TOP_N_PER_BLOCK:-$ASSEMBLE_TOP_N_PER_BLOCK}
+DPB1_ASSEMBLE_GLOBAL_POOL_CAP=${DPB1_ASSEMBLE_GLOBAL_POOL_CAP:-$ASSEMBLE_GLOBAL_POOL_CAP}
+DPB1_ASSEMBLE_MAX_BLOCKS=${DPB1_ASSEMBLE_MAX_BLOCKS:-$ASSEMBLE_MAX_BLOCKS}
+DPB1_ASSEMBLE_MAX_BLOCK_HAPS=${DPB1_ASSEMBLE_MAX_BLOCK_HAPS:-$ASSEMBLE_MAX_BLOCK_HAPS}
+DPB1_ASSEMBLE_MAX_PAIRED_COMBOS=${DPB1_ASSEMBLE_MAX_PAIRED_COMBOS:-$ASSEMBLE_MAX_PAIRED_COMBOS}
+DPB1_ASSEMBLE_MAX_WALL_SECONDS=${DPB1_ASSEMBLE_MAX_WALL_SECONDS:-$ASSEMBLE_MAX_WALL_SECONDS}
 
 # EM-based iterative remap refinement (post-baseline). 0 = off.
 EM_REFINE=${EM_REFINE:-1}
@@ -104,6 +117,14 @@ EM_REFINE_DPB1_RESCUE_CANDIDATES=${EM_REFINE_DPB1_RESCUE_CANDIDATES:-1}
 EM_REFINE_DPB1_RESCUE_MANIFEST=${EM_REFINE_DPB1_RESCUE_MANIFEST:-}
 EM_REFINE_PY=${EM_REFINE_PY:-${SCRIPTS_DIR}/iterative_remap_em.py}
 EM_REFINE_GATE_PY=${EM_REFINE_GATE_PY:-${SCRIPTS_DIR}/em_refine_gate.py}
+
+# Truth-free post-aggregation rescue generated from the current sample's own calls/EM output.
+# Set CLASS2_RESCUE_PROFILE=off to disable it for ablation/debug runs.
+CLASS2_RESCUE_PROFILE=${CLASS2_RESCUE_PROFILE:-truthfree_readsupport_class2}  # off|dqb1_drb1|combined_class2|truthfree_readsupport_class2
+CLASS2_DQB1_DRB1_RESCUE=${CLASS2_DQB1_DRB1_RESCUE:-0}
+CLASS2_DQB1_DRB1_RESCUE_MANIFEST_SUFFIX=${CLASS2_DQB1_DRB1_RESCUE_MANIFEST_SUFFIX:-class2_rescue.manifest.tsv}
+CLASS2_DQB1_DRB1_LD_MAP=${CLASS2_DQB1_DRB1_LD_MAP:-${SCRIPTS_DIR}/resources/drb1_dqb1_ld.tsv}
+
 EM_REFINE_GATE_HIGH_MASK=${EM_REFINE_GATE_HIGH_MASK:-0.40}
 EM_REFINE_GATE_AMBIG_DIFF=${EM_REFINE_GATE_AMBIG_DIFF:-0.35}
 EM_REFINE_GATE_AMBIG_TOP=${EM_REFINE_GATE_AMBIG_TOP:-0.42}
@@ -129,6 +150,12 @@ EM_REFINE_GATE_GENE_BASELINE_NEAR_TIE=${EM_REFINE_GATE_GENE_BASELINE_NEAR_TIE:-}
 EXON_TYPING=${EXON_TYPING:-1}
 EXON_TYPING_GENES=${EXON_TYPING_GENES:-"HLA-DRB1 HLA-DPB1 HLA-DQB1"}
 EXON_TYPING_PY=${EXON_TYPING_PY:-${SCRIPTS_DIR}/exon_typing_from_haps.py}
+
+# Primary mixed-sample report: four allele copies with copy proportions, without
+# implying donor/recipient side labels. Legacy R1/R2/D1/D2 outputs are still
+# written by aggregate_calls.py for backward compatibility.
+COPY_CALLS_OUTPUT=${COPY_CALLS_OUTPUT:-1}
+COPY_CALLS_PY=${COPY_CALLS_PY:-${SCRIPTS_DIR}/copy_calls_from_compact.py}
 
 # chimerism prior: 0 = donor major (allo-HSCT recipient blood, default).
 # Set to 1 for solid-organ tx etc.
@@ -411,6 +438,23 @@ PYEOF
             [[ $RECIPIENT_MAJOR -eq 1 ]] && CHIM_ARGS+=(--recipient-major)
         fi
 
+        local GENE_ASSEMBLE_PREFILTER_TOP="$ASSEMBLE_PREFILTER_TOP"
+        local GENE_ASSEMBLE_TOP_N_PER_BLOCK="$ASSEMBLE_TOP_N_PER_BLOCK"
+        local GENE_ASSEMBLE_GLOBAL_POOL_CAP="$ASSEMBLE_GLOBAL_POOL_CAP"
+        local GENE_ASSEMBLE_MAX_BLOCKS="$ASSEMBLE_MAX_BLOCKS"
+        local GENE_ASSEMBLE_MAX_BLOCK_HAPS="$ASSEMBLE_MAX_BLOCK_HAPS"
+        local GENE_ASSEMBLE_MAX_PAIRED_COMBOS="$ASSEMBLE_MAX_PAIRED_COMBOS"
+        local GENE_ASSEMBLE_MAX_WALL_SECONDS="$ASSEMBLE_MAX_WALL_SECONDS"
+        if [[ "$GENE" == "HLA-DPB1" ]]; then
+            GENE_ASSEMBLE_PREFILTER_TOP="$DPB1_ASSEMBLE_PREFILTER_TOP"
+            GENE_ASSEMBLE_TOP_N_PER_BLOCK="$DPB1_ASSEMBLE_TOP_N_PER_BLOCK"
+            GENE_ASSEMBLE_GLOBAL_POOL_CAP="$DPB1_ASSEMBLE_GLOBAL_POOL_CAP"
+            GENE_ASSEMBLE_MAX_BLOCKS="$DPB1_ASSEMBLE_MAX_BLOCKS"
+            GENE_ASSEMBLE_MAX_BLOCK_HAPS="$DPB1_ASSEMBLE_MAX_BLOCK_HAPS"
+            GENE_ASSEMBLE_MAX_PAIRED_COMBOS="$DPB1_ASSEMBLE_MAX_PAIRED_COMBOS"
+            GENE_ASSEMBLE_MAX_WALL_SECONDS="$DPB1_ASSEMBLE_MAX_WALL_SECONDS"
+        fi
+
         echo "[step] typing -> $ASM_OUT"
         "$PYBIN" -u "$ASSEMBLE_PY" \
             --vcf "$PH_VCF" \
@@ -423,7 +467,13 @@ PYEOF
             --bam "$MERGED_BAM" \
             --mask-min-depth "$MASK_MIN_DEPTH" \
             --aligner "$ASSEMBLE_ALIGNER" \
-            --prefilter-top "$ASSEMBLE_PREFILTER_TOP" \
+            --prefilter-top "$GENE_ASSEMBLE_PREFILTER_TOP" \
+            --top-n-per-block "$GENE_ASSEMBLE_TOP_N_PER_BLOCK" \
+            --global-pool-cap "$GENE_ASSEMBLE_GLOBAL_POOL_CAP" \
+            --max-blocks "$GENE_ASSEMBLE_MAX_BLOCKS" \
+            --max-block-haps "$GENE_ASSEMBLE_MAX_BLOCK_HAPS" \
+            --max-paired-combos "$GENE_ASSEMBLE_MAX_PAIRED_COMBOS" \
+            --max-wall-seconds "$GENE_ASSEMBLE_MAX_WALL_SECONDS" \
             "${CHIM_ARGS[@]}" \
             --dump-block-fa
     done
@@ -574,6 +624,8 @@ for entry in "${SAMPLES_FQ[@]}"; do
     # ---- 8. aggregate per-gene calls.tsv into one final summary ----
     FINAL="${ASM_ROOT}/${S}/${S}.final_calls.tsv"
     FINAL_COMPACT="${ASM_ROOT}/${S}/${S}.final_calls.compact.tsv"
+    FINAL_COPIES="${ASM_ROOT}/${S}/${S}.copy_calls.tsv"
+    FINAL_COPIES_COMPACT="${ASM_ROOT}/${S}/${S}.copy_calls.compact.tsv"
     "$PYBIN" "${SCRIPTS_DIR}/aggregate_calls.py" \
         --asm-root "$ASM_ROOT" --sample "$S" --out "$FINAL" \
         --spechla-root "$OUT_ROOT" \
@@ -581,6 +633,51 @@ for entry in "${SAMPLES_FQ[@]}"; do
         --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
         && echo "[FINAL] ${S}: ${FINAL}" \
         && echo "[FINAL compact] ${S}: ${FINAL_COMPACT}"
+
+    if [[ "$CLASS2_DQB1_DRB1_RESCUE" == "1" && "$CLASS2_RESCUE_PROFILE" == "off" ]]; then
+        CLASS2_RESCUE_PROFILE="dqb1_drb1"
+    fi
+
+    if [[ "$CLASS2_RESCUE_PROFILE" != "off" ]]; then
+        CLASS2_DQB1_MANIFEST="${ASM_ROOT}/${S}/${S}.${CLASS2_DQB1_DRB1_RESCUE_MANIFEST_SUFFIX}"
+        CLASS2_RESCUE_ARGS=()
+        case "$CLASS2_RESCUE_PROFILE" in
+            dqb1_drb1)
+                CLASS2_RESCUE_ARGS+=(--dqb1-from-drb1 --drb1-min-mask 999 --dpb1-min-mask 999)
+                ;;
+            combined_class2)
+                CLASS2_RESCUE_ARGS+=(--dqb1-from-drb1 --drb1-min-mask 999 --dpb1-min-mask 0.0)
+                ;;
+            truthfree_readsupport_class2)
+                CLASS2_RESCUE_ARGS+=(--class1-target90 --dqb1-from-drb1 --dqb1-high-copy-full-record --dqb1-rare-collapse --drb1-min-mask 0.0 --drb1-guarded-ld --drb1-full-record-present-copy --drb1-from-updated-dqb1 --dpb1-min-mask 0.0)
+                CLASS2_RESCUE_ARGS+=(--dpb1-common-minor --dpb1-absolute-common --dpb1-full-record-replacement --dpb1-full-record-present-copy --dpb1-common-candidate-record-gain --dpb1-absent-old-present-copy)
+                ;;
+            *)
+                echo "[ERROR] unknown CLASS2_RESCUE_PROFILE=$CLASS2_RESCUE_PROFILE (expected off|dqb1_drb1|combined_class2|truthfree_readsupport_class2)" >&2
+                exit 1
+                ;;
+        esac
+        "$PYBIN" "${SCRIPTS_DIR}/apply_class2_joint_rescue.py" \
+            --in-asm-root "$ASM_ROOT" \
+            --in-place \
+            --spechla-root "$OUT_ROOT" \
+            --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
+            --sample "$S" \
+            --manifest "$CLASS2_DQB1_MANIFEST" \
+            --compact-out "$FINAL_COMPACT" \
+            --drb1-dqb1-ld-map "$CLASS2_DQB1_DRB1_LD_MAP" \
+            "${CLASS2_RESCUE_ARGS[@]}" \
+            && echo "[class2-rescue:${CLASS2_RESCUE_PROFILE}] ${S}: ${CLASS2_DQB1_MANIFEST}"
+    fi
+
+    if [[ "$COPY_CALLS_OUTPUT" == "1" ]]; then
+        "$PYBIN" "$COPY_CALLS_PY" \
+            --compact "$FINAL_COMPACT" \
+            --out "$FINAL_COPIES" \
+            --compact-out "$FINAL_COPIES_COMPACT" \
+            && echo "[COPY calls] ${S}: ${FINAL_COPIES}" \
+            && echo "[COPY compact] ${S}: ${FINAL_COPIES_COMPACT}"
+    fi
 done
 
 echo "[INFO] All samples processed."

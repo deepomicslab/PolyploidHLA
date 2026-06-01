@@ -17,6 +17,7 @@ in D-slots; whatshap polyphase will phase the haplotype assignment.
 Usage:
     reassign_gt_chimeric.py --vcf in.vcf.gz --chi-r 0.27 --out out.vcf.gz \
         [--min-depth 10] [--min-obs-af 0.05] [--drop-fp-af 0.05]
+        [--drop-unassignable]
 """
 import argparse, gzip, os, sys, subprocess, tempfile
 
@@ -42,9 +43,9 @@ def gt_string(nR, nD):
 def open_in(path):
     return gzip.open(path, "rt") if path.endswith(".gz") else open(path, "r")
 
-def write_vcf(in_path, out_path, chi_r, min_depth, min_obs_af, drop_fp_af):
+def write_vcf(in_path, out_path, chi_r, min_depth, min_obs_af, drop_fp_af, drop_unassignable):
     chi_d = 1.0 - chi_r
-    n_in = n_out = n_drop_lowdepth = n_drop_fp = n_changed = 0
+    n_in = n_out = n_drop_lowdepth = n_drop_fp = n_drop_unassignable = n_changed = 0
     out_text = []
     with open_in(in_path) as fh:
         for line in fh:
@@ -61,27 +62,53 @@ def write_vcf(in_path, out_path, chi_r, min_depth, min_obs_af, drop_fp_af):
                 continue
             f = line.rstrip("\n").split("\t")
             if len(f) < 10:
-                out_text.append(line)
+                if drop_unassignable:
+                    n_drop_unassignable += 1
+                else:
+                    out_text.append(line)
                 continue
             n_in += 1
             chrom, pos, vid, ref, alt, qual, flt, info, fmt, sample = f[:10]
-            # only act on bi-allelic SNV/indel
+            # Only emit records that can be represented as a single ALT allele
+            # under the 2R+2D chimeric copy model when strict mode is enabled.
             if "," in alt:
-                out_text.append(line)
-                n_out += 1
+                if drop_unassignable:
+                    n_drop_unassignable += 1
+                else:
+                    out_text.append(line)
+                    n_out += 1
                 continue
             fmt_keys = fmt.split(":")
             sv = sample.split(":")
             d = dict(zip(fmt_keys, sv))
             ad = d.get("AD", "")
             if not ad or "," not in ad:
-                out_text.append(line)
-                n_out += 1
+                if drop_unassignable:
+                    n_drop_unassignable += 1
+                else:
+                    out_text.append(line)
+                    n_out += 1
                 continue
             try:
                 ad_list = [int(x) for x in ad.split(",")]
             except ValueError:
-                out_text.append(line); n_out += 1; continue
+                if drop_unassignable:
+                    n_drop_unassignable += 1
+                else:
+                    out_text.append(line); n_out += 1
+                continue
+            if len(ad_list) < 2:
+                if drop_unassignable:
+                    n_drop_unassignable += 1
+                else:
+                    out_text.append(line); n_out += 1
+                continue
+            if len(ad_list) > 2:
+                # After bcftools norm -m -any this should usually be ref,alt.
+                # If a caller leaves additional AD columns, keep the focal ALT
+                # depth and avoid passing a stale multi-allelic AD into whatshap.
+                ad_list = ad_list[:2]
+                d["AD"] = ",".join(str(x) for x in ad_list)
             tot = sum(ad_list)
             if tot < min_depth:
                 n_drop_lowdepth += 1
@@ -130,7 +157,8 @@ def write_vcf(in_path, out_path, chi_r, min_depth, min_obs_af, drop_fp_af):
             fo.writelines(out_text)
     sys.stderr.write(
         f"[reassign_gt] in={n_in} kept={n_out} changed_GT={n_changed} "
-        f"dropped_lowdepth(<{min_depth})={n_drop_lowdepth} dropped_FP(AF<{drop_fp_af})={n_drop_fp}\n")
+        f"dropped_lowdepth(<{min_depth})={n_drop_lowdepth} dropped_FP(AF<{drop_fp_af})={n_drop_fp} "
+        f"dropped_unassignable={n_drop_unassignable}\n")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -140,8 +168,9 @@ def main():
     ap.add_argument("--min-depth", type=int, default=10)
     ap.add_argument("--min-obs-af", type=float, default=0.05, help="(unused, for symmetry)")
     ap.add_argument("--drop-fp-af", type=float, default=0.05, help="drop sites with obs_AF below this (FP control)")
+    ap.add_argument("--drop-unassignable", action="store_true", help="drop records that cannot be rewritten to a 4-copy GT")
     args = ap.parse_args()
-    write_vcf(args.vcf, args.out, args.chi_r, args.min_depth, args.min_obs_af, args.drop_fp_af)
+    write_vcf(args.vcf, args.out, args.chi_r, args.min_depth, args.min_obs_af, args.drop_fp_af, args.drop_unassignable)
 
 if __name__ == "__main__":
     main()

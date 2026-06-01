@@ -17,7 +17,7 @@ sequences per gene tagged `R`(ecipient) / `D`(onor).
 | `reassign_gt_chimeric.py`   | χ-aware GT correction before phasing |
 | `estimate_chi_pooled.py`    | pooled-continuous χ_R estimator |
 | `iterative_remap_em.py`     | EM refinement (Salmon-style read remap) |
-| `rescue_gene_binned_reads.py` | conservative read-bin rescue v2 before per-gene alignment |
+| `rescue_gene_binned_reads.py` | validation-only read-bin rescue diagnostic/prototype |
 | `apply_class2_joint_rescue.py` | guarded class-II post-aggregate rescue |
 | `em_refine_gate.py`         | per-gene EM override gate logic |
 | `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
@@ -108,6 +108,13 @@ The pipeline also writes a concise companion file,
 alleles, four fitted copy fractions, and fit diagnostics. The original
 `<SAMPLE>.final_calls.tsv` remains the detailed result file.
 
+For mixed donor/recipient samples, the primary side-agnostic report is now
+written as `<SAMPLE>.copy_calls.tsv` and `<SAMPLE>.copy_calls.compact.tsv`.
+These files list the four allele copies and their estimated proportions without
+making R/D assignment part of the main result. The legacy R1/R2/D1/D2 slot is
+kept only as an annotation in the long file so old debugging workflows still
+have a bridge back to the assembly slots.
+
 When `DRB345_TYPING=1` (default), the pipeline also appends an `HLA-DRB345`
 row. This is not a seventh ordinary locus: it is a DRB1-linked add-on for the
 DRB3/DRB4/DRB5 genes. The add-on extracts read pairs with competitive DB
@@ -154,18 +161,15 @@ Optional environment / database overrides:
 | `ASSEMBLE_PREFILTER_TOP` | `200` | mappy prefilter size before parasail scoring; smaller is faster |
 | `EM_REFINE_PER_GENE_CHI` | `0` | experimental; fixed pooled/global χ is the recommended default |
 | `EM_REFINE_RECIPIENT_MINOR_RESCUE` | `1` | recover low-frequency recipient-only alleles when donor-major EM fitting collapses R/D to the donor-like pair |
-| `READ_BIN_RESCUE` | `1` | run truth-free read-bin rescue before per-gene alignment |
-| `READ_BIN_RESCUE_GENES` | `HLA-DPB1` | default target for conservative rescue; broaden only for validation |
-| `READ_BIN_RESCUE_RETENTION_GATE` | `1` | require abnormal full-vs-retained read support loss before rewriting a bin |
 | `REUSE_BINNING_ROOT` | empty | seed deduped FASTQs, DB BAM, per-gene FASTQs, and `header.sam` from a prior run |
 | `REUSE_BINNING_CLEAN_DOWNSTREAM` | `0` | remove downstream outputs after seeding cache when intentionally recomputing calls |
 
 The options above cover the recommended user-facing settings.
 
-The default read-bin rescue is deliberately conservative: DPB1-only,
-paired-mate evidence, and retention-gated. Broad all-gene rescue addresses a
-real binning-loss failure mode but can increase phasing cost and should be run
-only as an explicit validation mode.
+Read-bin rescue is currently a validation-only diagnostic, not part of the
+default production pipeline. Run `scripts/run_gendx_input_root_diagnostic.sh`
+first to prove that strict gene binning is losing usable read evidence; only
+after a rerun shows accuracy gain should rescue be promoted into the main flow.
 
 If indexes are missing after copying or replacing the resource directory, run:
 
@@ -232,6 +236,14 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
   `sample | gene | R1_allele | R1_copy_fraction | R2_allele |
   R2_copy_fraction | D1_allele | D1_copy_fraction | D2_allele |
   D2_copy_fraction | copy_identifiability | copy_fit_error`.
+* `<SAMPLE>.copy_calls.tsv` columns:
+  `sample | gene | copy_id | copy_rank | allele | allele_2field |
+  copy_fraction | proportion_source | legacy_slot | raw_copy_fraction |
+  copy_identifiability | copy_fit_error`.
+* `<SAMPLE>.copy_calls.compact.tsv` columns:
+  `sample | gene | allele_multiset | allele_2field_multiset |
+  copy_fractions | proportion_source | copy_identifiability |
+  copy_fit_error`.
 * Per-gene `calls.tsv` columns:
   `global_hap | assignment(R/D) | allele | hap_fraction |
   allele_read_fraction | allele_read_count | em_weight` for EM-refined calls,

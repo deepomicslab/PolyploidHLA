@@ -139,6 +139,27 @@ def read_tf_counts(path: Path) -> List[Tuple[str, float]]:
     return out
 
 
+def read_match_top(path: Path, top_n: int = 10) -> List[str]:
+    if not path.exists():
+        return []
+    grouped: Dict[Tuple[str, str], List[Tuple[str, float]]] = defaultdict(list)
+    with path.open() as fh:
+        for r in csv.DictReader(fh, delimiter="\t"):
+            try:
+                score = float(r.get("score", "0") or 0)
+            except ValueError:
+                continue
+            grouped[(r.get("block", ""), r.get("local_hap", ""))].append((two_field(r.get("allele", "")), score))
+    out: List[str] = []
+    seen = set()
+    for rows in grouped.values():
+        for allele, _score in sorted(rows, key=lambda item: -item[1])[:top_n]:
+            if allele and allele not in seen:
+                seen.add(allele)
+                out.append(allele)
+    return out
+
+
 def read_chi_r_fit(path: Path) -> Optional[float]:
     if not path.exists():
         return None
@@ -440,19 +461,36 @@ def enum_one(cur: Sequence[str], cands: Sequence[str]
     return out
 
 
+def enum_permute(cur: Sequence[str]) -> List[Tuple[str, str, str, str]]:
+    """Reassign only the current four alleles across R/D slots.
+
+    This keeps the reported quartet multiset fixed and only changes role/copy
+    placement, so it cannot introduce a new allele family.
+    """
+    out = []
+    seen = set()
+    for q in itertools.permutations(cur, 4):
+        key = quartet_key(q)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tuple(q))
+    return out
+
+
 # ---------------- per-locus engine ----------------
 
 class Locus:
     __slots__ = ("sample", "gene", "set_label", "cur", "fractions", "chi_r",
-                 "c0", "c1", "geno_c0", "geno_c1", "obs_af", "weight",
+                 "c0", "c1", "match_top", "geno_c0", "geno_c1", "obs_af", "weight",
                  "sites", "pair_counts", "stack_c0", "stack_c1")
 
     def __init__(self, sample, gene, set_label, cur, fractions, chi_r,
-                 c0, c1, geno_c0, geno_c1, obs_af, weight, sites, pair_counts,
+                 c0, c1, match_top, geno_c0, geno_c1, obs_af, weight, sites, pair_counts,
                  stack_c0, stack_c1):
         self.sample = sample; self.gene = gene; self.set_label = set_label
         self.cur = cur; self.fractions = fractions; self.chi_r = chi_r
-        self.c0 = c0; self.c1 = c1
+        self.c0 = c0; self.c1 = c1; self.match_top = match_top
         self.geno_c0 = geno_c0; self.geno_c1 = geno_c1
         self.obs_af = obs_af; self.weight = weight
         self.sites = sites; self.pair_counts = pair_counts
@@ -484,6 +522,7 @@ def build_locus(sample, gene, set_label, asm_root, out_root, ref_path, bed_path,
     if len(c0) < 2:
         return None
     c1 = build_candidates_C1(c0, gmap)
+    match_top = read_match_top(asm_root / sample / gene_lc / gene / "match_scores.tsv", top_k)
 
     contig = gene.replace("-", "_")
     s, e = parse_bed(str(bed_path), contig)
@@ -519,7 +558,7 @@ def build_locus(sample, gene, set_label, asm_root, out_root, ref_path, bed_path,
     sites_used, pair_counts = collect_phase_evidence(bam_path, contig, sites)
 
     return Locus(sample, gene, set_label, cur, fractions, chi_r,
-                 c0, c1, geno_c0, geno_c1, obs_af, weight,
+                 c0, c1, match_top, geno_c0, geno_c1, obs_af, weight,
                  sites_used, pair_counts, stack_c0, stack_c1)
 
 
@@ -545,9 +584,15 @@ STRATEGIES = [
     # phasing-augmented (restricted to swap/one to keep runtime sane)
     dict(name="C0_swap_EM_PHASE",         cset="c0", search="swap", channels=["em", "phase"]),
     dict(name="C0_one_EM_PHASE",          cset="c0", search="one",  channels=["em", "phase"]),
+    dict(name="C0_perm_EM_AF",            cset="c0", search="permute", channels=["em", "af"]),
+    dict(name="C0_perm_EM_DISC",          cset="c0", search="permute", channels=["em", "disc"]),
+    dict(name="C0_perm_EM_PHASE",         cset="c0", search="permute", channels=["em", "phase"]),
+    dict(name="C0_perm_EM_AF_PHASE",      cset="c0", search="permute", channels=["em", "af", "phase"]),
     dict(name="C0_swap_AF_PHASE",         cset="c0", search="swap", channels=["af", "phase"]),
     dict(name="C0_swap_EM_AF_PHASE",      cset="c0", search="swap", channels=["em", "af", "phase"]),
     dict(name="C0_one_EM_AF_PHASE",       cset="c0", search="one",  channels=["em", "af", "phase"]),
+    dict(name="C0_one_EM_AF_PHASE_REBAL", cset="c0", search="one",  channels=["em", "af", "phase"], copy_rebalance_only=True),
+    dict(name="C0_one_EM_AF_PHASE_MATCH_NODPB1", cset="c0", search="one", channels=["em", "af", "phase"], require_new_match=True, exclude_genes=["HLA-DPB1"]),
     dict(name="C1_swap_EM_AF_PHASE",      cset="c1", search="swap", channels=["em", "af", "phase"]),
 ]
 
@@ -591,6 +636,9 @@ def search_alts(strat, locus: Locus):
         qs = [q for q in qs if all(a in cands for a in q)]
     elif strat["search"] == "one":
         qs = enum_one(locus.cur, cands)
+    elif strat["search"] == "permute":
+        qs = enum_permute(locus.cur)
+        qs = [q for q in qs if all(a in cands for a in q)]
     else:
         qs = []
     seen = {quartet_key(locus.cur)}
@@ -605,6 +653,8 @@ def search_alts(strat, locus: Locus):
 
 
 def evaluate_strategy(strat, locus: Locus):
+    if locus.gene in strat.get("exclude_genes", []):
+        return None
     cur_score = score_quartet(locus.cur, locus, strat["cset"], strat["channels"])
     # Reject locus for this strategy if any required current channel is None.
     for ch in strat["channels"]:
@@ -613,6 +663,12 @@ def evaluate_strategy(strat, locus: Locus):
     best = None
     best_total_gain = 0.0
     for q in search_alts(strat, locus):
+        if strat.get("copy_rebalance_only") and not set(q).issubset(set(locus.cur)):
+            continue
+        if strat.get("require_new_match"):
+            introduced = [allele for allele in q if q.count(allele) > locus.cur.count(allele) and allele not in set(locus.cur)]
+            if introduced and not all(allele in set(locus.match_top) for allele in introduced):
+                continue
         sc = score_quartet(q, locus, strat["cset"], strat["channels"])
         ok = True
         total_gain = 0.0
@@ -646,14 +702,21 @@ def truth_score(quartet, truth_p, truth_d, gmap) -> int:
 
 # ---------------- driver ----------------
 
+def infer_set_label(sample: str, parent: str) -> str:
+    label = parent.replace(" ", "-").replace("_", "-").lower()
+    if label.startswith("set-") and len(label) >= 5:
+        return label
+    prefix = sample[:1].lower()
+    if prefix in {"a", "b", "c", "d"}:
+        return f"set-{prefix}"
+    return label
+
+
 def discover_samples(fq_root: Path) -> Dict[str, str]:
     out: Dict[str, str] = {}
-    for fq1 in sorted(fq_root.glob("*/*_R1_001.fastq.gz")):
+    for fq1 in sorted(fq_root.glob("**/*_R1_001.fastq.gz")):
         sample = fq1.name.replace("_R1_001.fastq.gz", "")
-        parent = fq1.parent.name
-        label = parent.replace(" ", "-").replace("_", "-").lower()
-        if label.startswith("set-") and len(label) >= 5:
-            out[sample] = label
+        out[sample] = infer_set_label(sample, fq1.parent.name)
     return out
 
 
@@ -668,9 +731,12 @@ def main():
     ap.add_argument("--imgt", required=True, type=Path)
     ap.add_argument("--report-prefix", required=True, type=Path)
     ap.add_argument("--top-k", type=int, default=10)
+    ap.add_argument("--exclude-samples", nargs="*", default=[])
     args = ap.parse_args()
 
     samples = discover_samples(args.fq_root)
+    for sample in args.exclude_samples:
+        samples.pop(sample, None)
     truths = {}
     for label in {v for v in samples.values()}:
         tp = args.truth_dir / f"truth_typing-{label}.tsv"
@@ -681,6 +747,7 @@ def main():
 
     rows: List[Dict[str, str]] = []
     cur_total = 0
+    cur_denom = 0
     for sample in sorted(samples):
         label = samples[sample]
         truth = truths.get(label)
@@ -694,6 +761,7 @@ def main():
             td = truth["DONOR"][gene] if truth else []
             cs = truth_score(locus.cur, tp, td, gmap) if truth else 0
             cur_total += cs
+            cur_denom += 4 if truth else 0
             print(f"[{sample}\t{gene}\tcur={','.join(locus.cur)}\tcur_score={cs}/4]",
                   flush=True)
             for strat in STRATEGIES:
@@ -777,13 +845,13 @@ def main():
                 pass
 
     with summary_path.open("w") as fh:
-        fh.write(f"# baseline 2field score (no rerank) = {cur_total}/360\n")
+        fh.write(f"# baseline 2field score (no rerank) = {cur_total}/{cur_denom}\n")
         fh.write("# strategy\tprop\timp\treg\tneu\thold\tskip\tnet\tafter\n")
         for name in [s["name"] for s in STRATEGIES]:
             s = by[name]
             after = cur_total + s["net"]
             fh.write(f"{name}\t{s['prop']}\t{s['imp']}\t{s['reg']}\t{s['neu']}"
-                     f"\t{s['hold']}\t{s['skip']}\t{s['net']}\t{after}/360\n")
+                     f"\t{s['hold']}\t{s['skip']}\t{s['net']}\t{after}/{cur_denom}\n")
         fh.write("\n# per-strategy by_set imp/reg/neu/net\n")
         for name in [s["name"] for s in STRATEGIES]:
             s = by[name]
@@ -802,13 +870,13 @@ def main():
             fh.write(line + "\n")
 
     print()
-    print(f"# baseline 2field score (no rerank) = {cur_total}/360")
+    print(f"# baseline 2field score (no rerank) = {cur_total}/{cur_denom}")
     print("# strategy\tprop\timp\treg\tneu\thold\tnet\tafter")
     for name in [s["name"] for s in STRATEGIES]:
         s = by[name]
         after = cur_total + s["net"]
         print(f"{name}\t{s['prop']}\t{s['imp']}\t{s['reg']}\t{s['neu']}"
-              f"\t{s['hold']}\t{s['net']}\t{after}/360")
+              f"\t{s['hold']}\t{s['net']}\t{after}/{cur_denom}")
 
 
 if __name__ == "__main__":

@@ -9,8 +9,14 @@ from __future__ import annotations
 import argparse
 import csv
 import re
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from hla_ld_maps import load_drb1_dqb1_map  # noqa: E402
 
 
 DEFAULT_SUMMARY = Path("diagnostics/quartet_summary_20260512.tsv")
@@ -18,15 +24,7 @@ DEFAULT_DIRECT = Path("diagnostics/direct_quartet_likelihood_classII_constrained
 DEFAULT_SPECHLA_ROOT = Path("/data2/wangxuedong/polyploid-hla-realsets/spechla_out_abc_realsets_rescue_20260512")
 DEFAULT_OUT_TSV = Path("diagnostics/class2_joint_rescue_20260513.tsv")
 DEFAULT_SUMMARY_OUT = Path("diagnostics/class2_joint_rescue_20260513.summary")
-
-DRB1_DQB1_LD = {
-    "DQB1*02:01": "DRB1*03:01",
-    "DQB1*02:02": "DRB1*07:01",
-    "DQB1*02:82": "DRB1*07:01",
-    "DQB1*02:109": "DRB1*03:01",
-    "DQB1*03:01": "DRB1*04:01",
-    "DQB1*06:02": "DRB1*15:01",
-}
+DEFAULT_DRB1_DQB1_LD_MAP = SCRIPT_DIR / "resources" / "drb1_dqb1_ld.tsv"
 
 DIRECT_CLASS2_GENES = {"HLA-DRB1", "HLA-DQB1", "HLA-DPB1"}
 
@@ -108,13 +106,13 @@ def load_direct_accepts(path: Path, gap_threshold: float):
     return accepted
 
 
-def ld_dr_from_dq(dqb1_row):
+def ld_dr_from_dq(dqb1_row, dqb1_to_drb1):
     if not dqb1_row:
         return None
     dqb1_quartet = quartet_from_row(dqb1_row)
     drb1_quartet = []
     for allele in dqb1_quartet:
-        drb1_allele = DRB1_DQB1_LD.get(allele)
+        drb1_allele = dqb1_to_drb1.get(allele)
         if not drb1_allele:
             return None
         drb1_quartet.append(drb1_allele)
@@ -165,7 +163,7 @@ def dpb1_rare_collapse(row, spechla_root: Path, min_fraction: float, rare_cutoff
     return candidate, changed
 
 
-def apply_strategy(row, strategy: str, by_sample, direct_accepts, spechla_root: Path, args):
+def apply_strategy(row, strategy: str, by_sample, direct_accepts, spechla_root: Path, args, dqb1_to_drb1):
     current = quartet_from_row(row)
     reason = "current"
     candidate = current
@@ -175,7 +173,7 @@ def apply_strategy(row, strategy: str, by_sample, direct_accepts, spechla_root: 
             candidate = direct_candidate
             reason = "direct_gate"
     if strategy in {"drdq_ld", "combined"} and row["gene"] == "HLA-DRB1":
-        ld_candidate = ld_dr_from_dq(by_sample[row["sample"]].get("HLA-DQB1"))
+        ld_candidate = ld_dr_from_dq(by_sample[row["sample"]].get("HLA-DQB1"), dqb1_to_drb1)
         if ld_candidate:
             candidate = ld_candidate
             reason = "drdq_ld"
@@ -225,8 +223,10 @@ def main() -> None:
     parser.add_argument("--dpb1-min-fraction", type=float, default=0.02)
     parser.add_argument("--dpb1-rare-cutoff", type=int, default=100)
     parser.add_argument("--dpb1-top-common", type=int, default=6)
+    parser.add_argument("--drb1-dqb1-ld-map", type=Path, default=DEFAULT_DRB1_DQB1_LD_MAP)
     args = parser.parse_args()
 
+    _drb1_to_dqb1, dqb1_to_drb1 = load_drb1_dqb1_map(args.drb1_dqb1_ld_map)
     rows, _by_sample_gene, by_sample = load_summary(args.summary)
     direct_accepts = load_direct_accepts(args.direct_tsv, args.direct_gap)
     strategies = ["current", "direct_gate", "drdq_ld", "dpb1_rare", "combined"]
@@ -243,6 +243,7 @@ def main() -> None:
                 direct_accepts,
                 args.spechla_root,
                 args,
+                dqb1_to_drb1,
             )
             current_score = int(row["score2"])
             new_score = quartet_score(candidate, truth_r, truth_d)
