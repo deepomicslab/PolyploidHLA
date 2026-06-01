@@ -1,11 +1,4 @@
 #!/bin/bash
-#SBATCH --job-name='polyphase_v2'
-#SBATCH --cpus-per-task=8
-#SBATCH --ntasks=1
-#SBATCH --output=log.polyphase_v2.log
-#SBATCH --mem=50G
-#SBATCH --time=14-00:00:00
-#
 # End-to-end polyploid (k=4) HLA typing for chimeric / mixed samples.
 #
 # Pipeline (per sample):
