@@ -219,10 +219,16 @@ def call_fraction(row: Optional[dict]) -> str:
         value = row.get(key)
         if value not in {None, "", "NA"}:
             try:
-                return f"{float(value):.6f}"
+                return format_fraction_value(float(value))
             except ValueError:
                 return str(value)
     return "NA"
+
+
+def format_fraction_value(value: float) -> str:
+    if abs(value) < 1e-4:
+        return f"{value:.3e}"
+    return f"{value:.6f}"
 
 
 def format_float(value: str, digits: int) -> str:
@@ -239,14 +245,23 @@ def call_read_support(row: Optional[dict], allele: str, support: dict[str, dict[
         row_fraction = row.get("allele_read_fraction") or row.get("read_fraction")
         row_count = row.get("allele_read_count") or row.get("read_count")
         if row_fraction or row_count:
-            return format_float(row_fraction or "NA", 6), format_float(row_count or "NA", 2)
+            return format_fraction_string(row_fraction or "NA"), format_float(row_count or "NA", 2)
     allele_support = support.get(allele_2field(allele), {})
     if not allele_support and complete_support and allele_2field(allele) != "NA":
-        return "0.000000", "0.00"
+        return "0.000e+00", "0.00"
     return (
-        format_float(allele_support.get("read_fraction", "NA"), 6),
+        format_fraction_string(allele_support.get("read_fraction", "NA")),
         format_float(allele_support.get("read_count", "NA"), 2),
     )
+
+
+def format_fraction_string(value: str) -> str:
+    if value in {"", "NA", None}:
+        return "NA"
+    try:
+        return format_fraction_value(float(value))
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def float_or_none(value) -> Optional[float]:
@@ -346,10 +361,10 @@ def fit_copy_fractions(slot_alleles: list[str], slot_read_fractions: list[str], 
     if np.any(best_x <= 1e-6):
         identifiable += ";boundary_zero"
     return {
-        "R1_copy_fraction_fit": f"{best_x[0]:.6f}",
-        "R2_copy_fraction_fit": f"{best_x[1]:.6f}",
-        "D1_copy_fraction_fit": f"{best_x[2]:.6f}",
-        "D2_copy_fraction_fit": f"{best_x[3]:.6f}",
+        "R1_copy_fraction_fit": format_fraction_value(float(best_x[0])),
+        "R2_copy_fraction_fit": format_fraction_value(float(best_x[1])),
+        "D1_copy_fraction_fit": format_fraction_value(float(best_x[2])),
+        "D2_copy_fraction_fit": format_fraction_value(float(best_x[3])),
         "copy_fit_error": f"{best_score:.8f}",
         "copy_identifiability": identifiable,
         "copy_chi_r": f"{chi_used:.6f}" if chi_used is not None else "NA",

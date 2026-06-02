@@ -150,6 +150,18 @@ EXON_TYPING_PY=${EXON_TYPING_PY:-${SCRIPTS_DIR}/exon_typing_from_haps.py}
 COPY_CALLS_OUTPUT=${COPY_CALLS_OUTPUT:-1}
 COPY_CALLS_PY=${COPY_CALLS_PY:-${SCRIPTS_DIR}/copy_calls_from_compact.py}
 
+# DRB3/4/5 linked add-on typing. This updates final_calls.tsv and
+# final_calls.compact.tsv before copy_calls output is generated.
+DRB345_TYPING=${DRB345_TYPING:-1}
+TYPE_DRB345_PY=${TYPE_DRB345_PY:-${SCRIPTS_DIR}/type_drb345.py}
+DRB345_SUBS_PER_2FIELD=${DRB345_SUBS_PER_2FIELD:-5}
+DRB345_TOP_PER_LOCUS=${DRB345_TOP_PER_LOCUS:-8}
+DRB345_DB_MIN_AS_FRAC=${DRB345_DB_MIN_AS_FRAC:-0.90}
+DRB345_REMAP_MIN_AS_FRAC=${DRB345_REMAP_MIN_AS_FRAC:-0.95}
+DRB345_EVIDENCE_K=${DRB345_EVIDENCE_K:-71}
+DRB345_MIN_LOCUS_UNIQUE_FRAC=${DRB345_MIN_LOCUS_UNIQUE_FRAC:--1.0}
+DRB345_DRB1_UNTRUSTED_MASK=${DRB345_DRB1_UNTRUSTED_MASK:-0.50}
+
 # chimerism prior: 0 = donor major (allo-HSCT recipient blood, default).
 # Set to 1 for solid-organ tx etc.
 RECIPIENT_MAJOR=${RECIPIENT_MAJOR:-0}
@@ -661,6 +673,33 @@ for entry in "${SAMPLES_FQ[@]}"; do
             --drb1-dqb1-ld-map "$CLASS2_DQB1_DRB1_LD_MAP" \
             "${CLASS2_RESCUE_ARGS[@]}" \
             && echo "[class2-rescue:${CLASS2_RESCUE_PROFILE}] ${S}: ${CLASS2_DQB1_MANIFEST}"
+    fi
+
+    if [[ "$DRB345_TYPING" == "1" ]]; then
+        DRB345_SAMPLE_DIR="${OUT_ROOT}/${S}"
+        DRB345_DB_BAM="${DRB345_SAMPLE_DIR}/${S}.map_database.bam"
+        if [[ -s "$DRB345_DB_BAM" ]]; then
+            "$PYBIN" "$TYPE_DRB345_PY" \
+                --sample "$S" \
+                --fq-dir "$DRB345_SAMPLE_DIR" \
+                --db-bam "$DRB345_DB_BAM" \
+                --asm-root "$ASM_ROOT" \
+                --final-calls "$FINAL" \
+                --compact-out "$FINAL_COMPACT" \
+                --imgt "$DB_PREFIX" \
+                --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
+                --threads "$THREADS" \
+                --subs-per-2field "$DRB345_SUBS_PER_2FIELD" \
+                --top-per-locus "$DRB345_TOP_PER_LOCUS" \
+                --db-min-as-frac "$DRB345_DB_MIN_AS_FRAC" \
+                --remap-min-as-frac "$DRB345_REMAP_MIN_AS_FRAC" \
+                --evidence-k "$DRB345_EVIDENCE_K" \
+                --min-locus-unique-frac "$DRB345_MIN_LOCUS_UNIQUE_FRAC" \
+                --drb1-untrusted-mask "$DRB345_DRB1_UNTRUSTED_MASK" \
+                && echo "[DRB345] ${S}: ${ASM_ROOT}/${S}/hla-drb345/HLA-DRB345/calls.tsv"
+        else
+            echo "[DRB345] ${S}: missing DB BAM; skip (${DRB345_DB_BAM})"
+        fi
     fi
 
     if [[ "$COPY_CALLS_OUTPUT" == "1" ]]; then

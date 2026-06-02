@@ -29,7 +29,9 @@ from itertools import permutations
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+DIAGNOSTICS_DIR = SCRIPT_DIR / "diagnostics"
 sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.insert(0, str(DIAGNOSTICS_DIR))
 
 from aggregate_calls import DEFAULT_GENES, allele_2field, main as aggregate_main  # noqa: E402
 from direct_read_quartet_likelihood import DEFAULT_IMGT, clean_allele  # noqa: E402

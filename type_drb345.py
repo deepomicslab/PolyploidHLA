@@ -385,6 +385,8 @@ def confident_loci(unique_support: dict[str, object], chi_r: float, min_fraction
 
 
 def format_fraction(value: float) -> str:
+    if abs(value) < 1e-4:
+        return f"{value:.3e}"
     return f"{value:.6f}"
 
 
@@ -450,9 +452,37 @@ def update_final_calls(final_calls: Path, rows: list[dict[str, str]], gmap, sour
         out[f"{slot}_fraction"] = row.get("hap_fraction", "NA")
         out[f"{slot}_read_fraction"] = row.get("allele_read_fraction", "NA")
         out[f"{slot}_read_count"] = row.get("allele_read_count", "NA")
+        out[f"{slot}_copy_fraction_fit"] = row.get("hap_fraction", "NA")
+    out["copy_identifiability"] = source
+    out["copy_fit_error"] = "NA"
     kept = [row for row in existing if row.get("gene") != "HLA-DRB345"]
     kept.append(out)
     write_tsv(final_calls, fields, kept)
+
+
+def update_compact_calls(compact_calls: Path, sample: str, rows: list[dict[str, str]], source: str) -> None:
+    existing = read_tsv(compact_calls)
+    fields = list(existing[0].keys()) if existing else [
+        "sample", "gene",
+        "R1_allele", "R1_copy_fraction", "R2_allele", "R2_copy_fraction",
+        "D1_allele", "D1_copy_fraction", "D2_allele", "D2_copy_fraction",
+        "copy_identifiability", "copy_fit_error",
+    ]
+    by_hap = {row["global_hap"]: row for row in rows}
+    out = {
+        "sample": sample,
+        "gene": "HLA-DRB345",
+        "copy_identifiability": source,
+        "copy_fit_error": "NA",
+    }
+    for idx, slot in enumerate(("R1", "R2", "D1", "D2"), 1):
+        row = by_hap.get(str(idx), {})
+        allele = row.get("allele", "NA") or "NA"
+        out[f"{slot}_allele"] = allele
+        out[f"{slot}_copy_fraction"] = row.get("hap_fraction", "NA")
+    kept = [row for row in existing if row.get("gene") != "HLA-DRB345"]
+    kept.append(out)
+    write_tsv(compact_calls, fields, kept)
 
 
 def main() -> None:
@@ -462,6 +492,7 @@ def main() -> None:
     parser.add_argument("--db-bam", required=True, type=Path)
     parser.add_argument("--asm-root", required=True, type=Path)
     parser.add_argument("--final-calls", required=True, type=Path)
+    parser.add_argument("--compact-out", type=Path, default=None)
     parser.add_argument("--imgt", type=Path, default=DEFAULT_IMGT)
     parser.add_argument("--g-group", type=Path, default=DEFAULT_G_GROUP)
     parser.add_argument("--out-dir", type=Path, default=None)
@@ -539,6 +570,8 @@ def main() -> None:
     source = "drb345-evidence-em" if mode == "evidence" else "drb345-linked-em"
     warning = "drb1_untrusted_drb345_evidence" if mode == "evidence" else "drb1_linked_drb345"
     update_final_calls(args.final_calls, call_rows, gmap, source, warning)
+    if args.compact_out is not None:
+        update_compact_calls(args.compact_out, args.sample, call_rows, source)
 
     manifest = out_dir / "HLA-DRB345.manifest.tsv"
     manifest_fields = ["sample", "chi_r", "mode", "db_target_read_names", "fq1_pairs", "fq2_pairs", "em_reads", "em_iters", "sum_abs_diff", "drb1_untrusted", "locus_unique_k", "locus_unique_threshold", "allowed_loci", "unique_pairs_DRB3", "unique_pairs_DRB4", "unique_pairs_DRB5", "unique_frac_DRB3", "unique_frac_DRB4", "unique_frac_DRB5", "drb1_R1", "drb1_R2", "drb1_D1", "drb1_D2", "quartet"]

@@ -29,6 +29,12 @@ def parse_fraction(value: str) -> float | None:
         return None
 
 
+def format_fraction(value: float) -> str:
+    if abs(value) < 1e-4:
+        return f"{value:.3e}"
+    return f"{value:.6f}"
+
+
 def allele_2field(allele: str) -> str:
     if not allele or allele == "NA" or "*" not in allele:
         return allele or "NA"
@@ -43,11 +49,11 @@ def normalize_copy_fractions(copies: list[dict[str, str]]) -> str:
         total = sum(value for value in parsed if value is not None)
         if total > 0:
             for copy, value in zip(copies, parsed):
-                copy["copy_fraction"] = f"{(value or 0.0) / total:.6f}"
+                copy["copy_fraction"] = format_fraction((value or 0.0) / total)
             return "copy_fraction_fit"
     fallback = 1.0 / len(copies) if copies else 0.0
     for copy in copies:
-        copy["copy_fraction"] = f"{fallback:.6f}"
+        copy["copy_fraction"] = format_fraction(fallback)
     return "equal_fraction_fallback"
 
 

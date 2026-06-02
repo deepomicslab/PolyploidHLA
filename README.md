@@ -96,6 +96,8 @@ The file keeps both high-resolution calls and conservative report calls:
   allele-family read-support error under `x >= 0` and `sum(x)=1`, using the
   sample/gene chi as a weak regularizer when duplicated alleles make the copy
   split underdetermined.
+  Values smaller than `1e-4` are written in scientific notation, so tiny values
+  and exact boundary zeros are not displayed as fixed-width `0.000000`.
 * `copy_fit_error`, `copy_identifiability`, `copy_chi_r`, and
   `allele_support_fraction_sum`: diagnostics for the copy-fraction fit.
   `boundary_zero` means the constrained fit placed one slot at zero because it
