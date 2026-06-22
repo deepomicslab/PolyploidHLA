@@ -1,8 +1,10 @@
 # Polyploid HLA Typing
 
 End-to-end pipeline for **chimeric (k=4) HLA typing** of allo-HSCT and
-solid-organ transplant samples from short-read FASTQs. Outputs 4 haplotype
-sequences per gene tagged `R`(ecipient) / `D`(onor).
+solid-organ transplant samples from short-read FASTQs. The detailed aggregate
+keeps the legacy R1/R2/D1/D2 assembly slots, while the primary mixed-sample
+report lists four allele copies per gene sorted by estimated copy proportion
+without making recipient/donor assignment part of the final call.
 
 - Installation & environment: [INSTALL.md](INSTALL.md)
 
@@ -57,25 +59,39 @@ FQ1=/path/sample.R1.fq.gz \
 FQ2=/path/sample.R2.fq.gz \
 SAMPLE=mySample \
 RECIPIENT_MAJOR=0 \
+WORK_DIR=$PWD/run_outputs \
 bash polyphase_v2.sh
 ```
 
-**Final result — one file, six primary genes plus optional DRB345:**
+`WORK_DIR` controls where outputs are written. If it is not set, the driver
+uses the parent directory of `polyphase_v2.sh` and writes `${WORK_DIR}/asm_v2`
+and `${WORK_DIR}/spechla_out`.
+
+**Final result files — six primary genes plus optional DRB345:**
 
 ```bash
-column -t asm_v2/mySample/mySample.final_calls.tsv
+column -t run_outputs/asm_v2/mySample/mySample.copy_calls.tsv
+column -t run_outputs/asm_v2/mySample/mySample.final_calls.tsv
 ```
 
-Example:
+Primary side-agnostic copy report:
 
 ```
-sample      gene      R1            R2            D1            D2            source
-mySample    HLA-A     A*01:01:01:01 A*23:01:01:01 A*01:01:01:01 A*29:02:01:02 em-refined
-mySample    HLA-B     B*08:01:01:01 B*44:03:01:01 B*08:01:01:01 B*45:01:01:01 em-refined
+sample    gene   copy_id copy_rank allele          allele_2field copy_fraction read_count proportion_source legacy_slot raw_copy_fraction copy_identifiability        copy_fit_error
+mySample  HLA-A  copy1   1         A*29:02:01:02   A*29:02       0.445599      1425.14    copy_fraction_fit D2          0.445599          underdetermined_chi_regularized 0.00000000
+mySample  HLA-A  copy2   2         A*01:01:01:01   A*01:01       0.344401      1149.35    copy_fraction_fit R1          0.344401          underdetermined_chi_regularized 0.00000000
 ...
 ```
 
-The file keeps both high-resolution calls and conservative report calls:
+Detailed R/D-slot aggregate:
+
+```
+sample    gene   R1_full        R2_full        D1_full        D2_full        R1_report R2_report D1_report D2_report R1_read_count R2_read_count D1_read_count D2_read_count source
+mySample  HLA-A  A*01:01:01:01 A*23:01:01:01 A*01:01:01:01 A*29:02:01:02 A*01:01   A*23:01   A*01:01   A*29:02   1149.35       623.77        1149.35       1425.14       em_refine
+...
+```
+
+The detailed file keeps both high-resolution calls and conservative report calls:
 
 * `*_full`: full allele chosen by the pipeline.
 * `*_2field`: allele collapsed to 2-field, useful when truth is low resolution.
@@ -107,17 +123,17 @@ The file keeps both high-resolution calls and conservative report calls:
 
 The pipeline also writes a concise companion file,
 `<SAMPLE>.final_calls.compact.tsv`, with only the sample, gene, four reported
-alleles, four fitted copy fractions, per-allele read counts, and fit diagnostics. The original
-`<SAMPLE>.final_calls.tsv` remains the detailed result file.
+alleles, four fitted copy fractions, per-allele read counts, and fit diagnostics.
+The original `<SAMPLE>.final_calls.tsv` remains the detailed result file.
 
 For mixed donor/recipient samples, the primary side-agnostic report is now
 written as `<SAMPLE>.copy_calls.tsv` and `<SAMPLE>.copy_calls.compact.tsv`.
 These files list the four allele copies and their estimated proportions without
 making R/D assignment part of the main result. The long file also carries the
 EM-assigned effective read count supporting each reported allele copy, and the
-compact file carries these counts in the same order as `copy_fractions`. The legacy R1/R2/D1/D2 slot is
-kept only as an annotation in the long file so old debugging workflows still
-have a bridge back to the assembly slots.
+compact file carries these counts in the same order as `copy_fractions`. The
+legacy R1/R2/D1/D2 slot is kept only as an annotation in the long file so old
+debugging workflows still have a bridge back to the assembly slots.
 
 When `DRB345_TYPING=1` (default), the pipeline also appends an `HLA-DRB345`
 row. This is not a seventh ordinary locus: it is a DRB1-linked add-on for the
@@ -212,7 +228,10 @@ the sample falls into one of those boundary cases.
 
 ```
 asm_v2/<SAMPLE>/
-    <SAMPLE>.final_calls.tsv          ★ FINAL aggregated result (one row per gene)
+    <SAMPLE>.copy_calls.tsv           ★ PRIMARY mixed-sample result (four sorted allele copies per gene)
+    <SAMPLE>.copy_calls.compact.tsv   compact copy multiset/proportion/read-count result
+    <SAMPLE>.final_calls.tsv          detailed R/D-slot aggregate result (one row per gene)
+    <SAMPLE>.final_calls.compact.tsv  compact R/D-slot allele/proportion/read-count result
     <SAMPLE>.exon_calls.tsv           exon-level G group diagnostic for high-mask genes
     <gene_lc>/<HLA-X>/
         calls.tsv                     per-gene final 4-hap call (R/D-tagged)
