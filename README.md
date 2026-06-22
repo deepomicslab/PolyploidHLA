@@ -77,9 +77,9 @@ column -t run_outputs/asm_v2/mySample/mySample.final_calls.tsv
 Primary side-agnostic copy report:
 
 ```
-sample    gene   copy_id copy_rank allele          allele_2field copy_fraction read_count proportion_source legacy_slot raw_copy_fraction copy_identifiability        copy_fit_error
-mySample  HLA-A  copy1   1         A*29:02:01:02   A*29:02       0.445599      1425.14    copy_fraction_fit D2          0.445599          underdetermined_chi_regularized 0.00000000
-mySample  HLA-A  copy2   2         A*01:01:01:01   A*01:01       0.344401      1149.35    copy_fraction_fit R1          0.344401          underdetermined_chi_regularized 0.00000000
+sample    gene   copy_id copy_rank allele          allele_2field copy_fraction allele_read_count copy_read_count proportion_source legacy_slot raw_copy_fraction copy_identifiability        copy_fit_error
+mySample  HLA-A  copy1   1         A*29:02:01:02   A*29:02       0.445599      1425.14           1425.14         copy_fraction_fit D2          0.445599          underdetermined_chi_regularized 0.00000000
+mySample  HLA-A  copy2   2         A*01:01:01:01   A*01:01       0.344401      1149.35           1100.29         copy_fraction_fit R1          0.344401          underdetermined_chi_regularized 0.00000000
 ...
 ```
 
@@ -129,9 +129,13 @@ The original `<SAMPLE>.final_calls.tsv` remains the detailed result file.
 For mixed donor/recipient samples, the primary side-agnostic report is now
 written as `<SAMPLE>.copy_calls.tsv` and `<SAMPLE>.copy_calls.compact.tsv`.
 These files list the four allele copies and their estimated proportions without
-making R/D assignment part of the main result. The long file also carries the
-EM-assigned effective read count supporting each reported allele copy, and the
-compact file carries these counts in the same order as `copy_fractions`. The
+making R/D assignment part of the main result. The long file carries both
+`allele_read_count`, the EM-assigned effective read count supporting each
+reported allele family, and `copy_read_count`, the same support apportioned
+across repeated copies of that allele according to the fitted copy fractions.
+The compact file carries these count vectors in the same order as
+`copy_fractions`. `allele_read_count` can be nonzero when a fitted duplicate
+copy fraction is zero, but `copy_read_count` will be zero for that row. The
 legacy R1/R2/D1/D2 slot is kept only as an annotation in the long file so old
 debugging workflows still have a bridge back to the assembly slots.
 
@@ -262,11 +266,11 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
   D2_read_count | copy_identifiability | copy_fit_error`.
 * `<SAMPLE>.copy_calls.tsv` columns:
   `sample | gene | copy_id | copy_rank | allele | allele_2field |
-  copy_fraction | read_count | proportion_source | legacy_slot |
+  copy_fraction | allele_read_count | copy_read_count | proportion_source | legacy_slot |
   raw_copy_fraction | copy_identifiability | copy_fit_error`.
 * `<SAMPLE>.copy_calls.compact.tsv` columns:
   `sample | gene | allele_multiset | allele_2field_multiset |
-  copy_fractions | read_counts | proportion_source | copy_identifiability |
+  copy_fractions | allele_read_counts | copy_read_counts | proportion_source | copy_identifiability |
   copy_fit_error`.
 * Per-gene `calls.tsv` columns:
   `global_hap | assignment(R/D) | allele | hap_fraction |

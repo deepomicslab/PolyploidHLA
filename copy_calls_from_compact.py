@@ -29,6 +29,15 @@ def parse_fraction(value: str) -> float | None:
         return None
 
 
+def format_count(value: float) -> str:
+    return f"{value:.2f}"
+
+
+def sort_fraction(value: str) -> float:
+    parsed = parse_fraction(value)
+    return parsed if parsed is not None else -1.0
+
+
 def format_fraction(value: float) -> str:
     if abs(value) < 1e-4:
         return f"{value:.3e}"
@@ -57,6 +66,25 @@ def normalize_copy_fractions(copies: list[dict[str, str]]) -> str:
     return "equal_fraction_fallback"
 
 
+def assign_copy_read_counts(copies: list[dict[str, str]]) -> None:
+    fraction_sum_by_allele: dict[str, float] = {}
+    for copy in copies:
+        fraction = parse_fraction(copy["copy_fraction"])
+        if fraction is None:
+            continue
+        fraction_sum_by_allele[copy["allele_2field"]] = fraction_sum_by_allele.get(copy["allele_2field"], 0.0) + fraction
+    for copy in copies:
+        allele_count = parse_fraction(copy["allele_read_count"])
+        copy_fraction = parse_fraction(copy["copy_fraction"])
+        fraction_sum = fraction_sum_by_allele.get(copy["allele_2field"], 0.0)
+        if allele_count is None or copy_fraction is None:
+            copy["copy_read_count"] = "NA"
+        elif fraction_sum > 0:
+            copy["copy_read_count"] = format_count(allele_count * copy_fraction / fraction_sum)
+        else:
+            copy["copy_read_count"] = "0.00"
+
+
 def copy_rows_from_gene(row: dict[str, str]) -> tuple[list[dict[str, str]], dict[str, str]]:
     copies: list[dict[str, str]] = []
     for slot_index, slot in enumerate(SLOTS, 1):
@@ -70,14 +98,16 @@ def copy_rows_from_gene(row: dict[str, str]) -> tuple[list[dict[str, str]], dict
             "allele_2field": allele_2field(allele),
             "raw_copy_fraction": row.get(f"{slot}_copy_fraction", "NA") or "NA",
             "copy_fraction": "NA",
-            "read_count": row.get(f"{slot}_read_count", "NA") or "NA",
+            "allele_read_count": row.get(f"{slot}_read_count", "NA") or "NA",
+            "copy_read_count": "NA",
             "copy_identifiability": row.get("copy_identifiability", ""),
             "copy_fit_error": row.get("copy_fit_error", ""),
         })
     source = normalize_copy_fractions(copies)
+    assign_copy_read_counts(copies)
     for copy in copies:
         copy["proportion_source"] = source
-    copies.sort(key=lambda item: (-parse_fraction(item["copy_fraction"]), item["allele"], item["legacy_slot_index"]))
+    copies.sort(key=lambda item: (-sort_fraction(item["copy_fraction"]), item["allele"], item["legacy_slot_index"]))
     for rank, copy in enumerate(copies, 1):
         copy["copy_id"] = f"copy{rank}"
         copy["copy_rank"] = str(rank)
@@ -87,7 +117,8 @@ def copy_rows_from_gene(row: dict[str, str]) -> tuple[list[dict[str, str]], dict
         "allele_multiset": ",".join(copy["allele"] for copy in copies),
         "allele_2field_multiset": ",".join(copy["allele_2field"] for copy in copies),
         "copy_fractions": ",".join(copy["copy_fraction"] for copy in copies),
-        "read_counts": ",".join(copy["read_count"] for copy in copies),
+        "allele_read_counts": ",".join(copy["allele_read_count"] for copy in copies),
+        "copy_read_counts": ",".join(copy["copy_read_count"] for copy in copies),
         "proportion_source": source,
         "copy_identifiability": row.get("copy_identifiability", ""),
         "copy_fit_error": row.get("copy_fit_error", ""),
@@ -119,11 +150,12 @@ def main() -> None:
 
     long_fields = [
         "sample", "gene", "copy_id", "copy_rank", "allele", "allele_2field", "copy_fraction",
-        "read_count", "proportion_source", "legacy_slot", "raw_copy_fraction", "copy_identifiability", "copy_fit_error",
+        "allele_read_count", "copy_read_count", "proportion_source", "legacy_slot", "raw_copy_fraction",
+        "copy_identifiability", "copy_fit_error",
     ]
     compact_fields = [
         "sample", "gene", "allele_multiset", "allele_2field_multiset", "copy_fractions",
-        "read_counts", "proportion_source", "copy_identifiability", "copy_fit_error",
+        "allele_read_counts", "copy_read_counts", "proportion_source", "copy_identifiability", "copy_fit_error",
     ]
     write_tsv(args.out, long_fields, long_rows)
     if args.compact_out is not None:
