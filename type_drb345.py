@@ -464,10 +464,17 @@ def update_compact_calls(compact_calls: Path, sample: str, rows: list[dict[str, 
     existing = read_tsv(compact_calls)
     fields = list(existing[0].keys()) if existing else [
         "sample", "gene",
-        "R1_allele", "R1_copy_fraction", "R2_allele", "R2_copy_fraction",
-        "D1_allele", "D1_copy_fraction", "D2_allele", "D2_copy_fraction",
+        "R1_allele", "R1_copy_fraction", "R1_read_count",
+        "R2_allele", "R2_copy_fraction", "R2_read_count",
+        "D1_allele", "D1_copy_fraction", "D1_read_count",
+        "D2_allele", "D2_copy_fraction", "D2_read_count",
         "copy_identifiability", "copy_fit_error",
     ]
+    for slot in ("R1", "R2", "D1", "D2"):
+        read_count_field = f"{slot}_read_count"
+        if read_count_field not in fields:
+            insert_after = f"{slot}_copy_fraction"
+            fields.insert(fields.index(insert_after) + 1, read_count_field)
     by_hap = {row["global_hap"]: row for row in rows}
     out = {
         "sample": sample,
@@ -480,6 +487,7 @@ def update_compact_calls(compact_calls: Path, sample: str, rows: list[dict[str, 
         allele = row.get("allele", "NA") or "NA"
         out[f"{slot}_allele"] = allele
         out[f"{slot}_copy_fraction"] = row.get("hap_fraction", "NA")
+        out[f"{slot}_read_count"] = row.get("allele_read_count", "NA")
     kept = [row for row in existing if row.get("gene") != "HLA-DRB345"]
     kept.append(out)
     write_tsv(compact_calls, fields, kept)

@@ -70,6 +70,7 @@ def copy_rows_from_gene(row: dict[str, str]) -> tuple[list[dict[str, str]], dict
             "allele_2field": allele_2field(allele),
             "raw_copy_fraction": row.get(f"{slot}_copy_fraction", "NA") or "NA",
             "copy_fraction": "NA",
+            "read_count": row.get(f"{slot}_read_count", "NA") or "NA",
             "copy_identifiability": row.get("copy_identifiability", ""),
             "copy_fit_error": row.get("copy_fit_error", ""),
         })
@@ -86,6 +87,7 @@ def copy_rows_from_gene(row: dict[str, str]) -> tuple[list[dict[str, str]], dict
         "allele_multiset": ",".join(copy["allele"] for copy in copies),
         "allele_2field_multiset": ",".join(copy["allele_2field"] for copy in copies),
         "copy_fractions": ",".join(copy["copy_fraction"] for copy in copies),
+        "read_counts": ",".join(copy["read_count"] for copy in copies),
         "proportion_source": source,
         "copy_identifiability": row.get("copy_identifiability", ""),
         "copy_fit_error": row.get("copy_fit_error", ""),
@@ -117,11 +119,11 @@ def main() -> None:
 
     long_fields = [
         "sample", "gene", "copy_id", "copy_rank", "allele", "allele_2field", "copy_fraction",
-        "proportion_source", "legacy_slot", "raw_copy_fraction", "copy_identifiability", "copy_fit_error",
+        "read_count", "proportion_source", "legacy_slot", "raw_copy_fraction", "copy_identifiability", "copy_fit_error",
     ]
     compact_fields = [
         "sample", "gene", "allele_multiset", "allele_2field_multiset", "copy_fractions",
-        "proportion_source", "copy_identifiability", "copy_fit_error",
+        "read_counts", "proportion_source", "copy_identifiability", "copy_fit_error",
     ]
     write_tsv(args.out, long_fields, long_rows)
     if args.compact_out is not None:

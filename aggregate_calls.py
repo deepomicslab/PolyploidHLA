@@ -470,6 +470,7 @@ def compact_row(row: dict[str, str]) -> dict[str, str]:
     for slot in SLOTS:
         out[f"{slot}_allele"] = row.get(f"{slot}_report") or row.get(f"{slot}_2field") or row.get(f"{slot}_full", "NA")
         out[f"{slot}_copy_fraction"] = row.get(f"{slot}_copy_fraction_fit", "NA")
+        out[f"{slot}_read_count"] = row.get(f"{slot}_read_count", "NA")
     out["copy_identifiability"] = row.get("copy_identifiability", "")
     out["copy_fit_error"] = row.get("copy_fit_error", "")
     return out
@@ -516,8 +517,10 @@ def main():
         compact_path = args.compact_out or default_compact_path(out_path)
         compact_cols = [
             "sample", "gene",
-            "R1_allele", "R1_copy_fraction", "R2_allele", "R2_copy_fraction",
-            "D1_allele", "D1_copy_fraction", "D2_allele", "D2_copy_fraction",
+            "R1_allele", "R1_copy_fraction", "R1_read_count",
+            "R2_allele", "R2_copy_fraction", "R2_read_count",
+            "D1_allele", "D1_copy_fraction", "D1_read_count",
+            "D2_allele", "D2_copy_fraction", "D2_read_count",
             "copy_identifiability", "copy_fit_error",
         ]
         write_rows(compact_path, compact_cols, [compact_row(row) for row in rows])

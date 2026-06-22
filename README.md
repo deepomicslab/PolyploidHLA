@@ -107,13 +107,15 @@ The file keeps both high-resolution calls and conservative report calls:
 
 The pipeline also writes a concise companion file,
 `<SAMPLE>.final_calls.compact.tsv`, with only the sample, gene, four reported
-alleles, four fitted copy fractions, and fit diagnostics. The original
+alleles, four fitted copy fractions, per-allele read counts, and fit diagnostics. The original
 `<SAMPLE>.final_calls.tsv` remains the detailed result file.
 
 For mixed donor/recipient samples, the primary side-agnostic report is now
 written as `<SAMPLE>.copy_calls.tsv` and `<SAMPLE>.copy_calls.compact.tsv`.
 These files list the four allele copies and their estimated proportions without
-making R/D assignment part of the main result. The legacy R1/R2/D1/D2 slot is
+making R/D assignment part of the main result. The long file also carries the
+EM-assigned effective read count supporting each reported allele copy, and the
+compact file carries these counts in the same order as `copy_fractions`. The legacy R1/R2/D1/D2 slot is
 kept only as an annotation in the long file so old debugging workflows still
 have a bridge back to the assembly slots.
 
@@ -235,16 +237,17 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
   copy_chi_r | allele_support_fraction_sum | source | mean_mask_fraction |
   report_level | warning`.
 * `<SAMPLE>.final_calls.compact.tsv` columns:
-  `sample | gene | R1_allele | R1_copy_fraction | R2_allele |
-  R2_copy_fraction | D1_allele | D1_copy_fraction | D2_allele |
-  D2_copy_fraction | copy_identifiability | copy_fit_error`.
+  `sample | gene | R1_allele | R1_copy_fraction | R1_read_count |
+  R2_allele | R2_copy_fraction | R2_read_count | D1_allele |
+  D1_copy_fraction | D1_read_count | D2_allele | D2_copy_fraction |
+  D2_read_count | copy_identifiability | copy_fit_error`.
 * `<SAMPLE>.copy_calls.tsv` columns:
   `sample | gene | copy_id | copy_rank | allele | allele_2field |
-  copy_fraction | proportion_source | legacy_slot | raw_copy_fraction |
-  copy_identifiability | copy_fit_error`.
+  copy_fraction | read_count | proportion_source | legacy_slot |
+  raw_copy_fraction | copy_identifiability | copy_fit_error`.
 * `<SAMPLE>.copy_calls.compact.tsv` columns:
   `sample | gene | allele_multiset | allele_2field_multiset |
-  copy_fractions | proportion_source | copy_identifiability |
+  copy_fractions | read_counts | proportion_source | copy_identifiability |
   copy_fit_error`.
 * Per-gene `calls.tsv` columns:
   `global_hap | assignment(R/D) | allele | hap_fraction |
