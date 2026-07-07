@@ -200,7 +200,10 @@ def main():
         count_read_for_each_gene[assigned_locus] += 1
  
     # generate gene-specific fastq
-    for gene in ['A', 'B', 'C', 'DPA1', 'DPB1', 'DQA1', 'DQB1', 'DRB1']:
+    for gene in options.genes.split(','):
+        gene = gene.strip()
+        if not gene:
+            continue
         if gene in count_read_for_each_gene:
             read_num = count_read_for_each_gene[gene]
         else:
@@ -221,6 +224,8 @@ if __name__ == "__main__":
     parser.add_argument('-2', '--fq2', help='fq2', required=True)  
     parser.add_argument('-n', '--bin_dir', help='bin dir', required=True)  
     parser.add_argument('-nm', '--max_nm', help='MAX mismatch num', required=False, default = 2, type=int)
+    parser.add_argument('--genes', help='comma-separated genes to emit FASTQs for', required=False,
+                        default='A,B,C,DPA1,DPB1,DQA1,DQB1,DRB1')
     parser.add_argument('-d', '--diff_score', help='The score for the best-matched gene must be at least this higher\
          than the second gene', required=True, default = 0.1, type=float)
     options = parser.parse_args()

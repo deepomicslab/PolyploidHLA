@@ -52,6 +52,10 @@ def filter_gene(db, gene):
     return {n: s for n, s in db.items() if n.startswith(pfx)}
 
 
+def gene_short_name(gene):
+    return gene.split("-", 1)[1] if gene.startswith("HLA-") else gene
+
+
 def two_field(name):
     a, b = name.split("*")
     fields = b.split(":")
@@ -622,7 +626,7 @@ def main():
     print(f"  {len(db)} alleles", flush=True)
     summary = []
     for g in args.gene:
-        short = g.split("-")[1]
+        short = gene_short_name(g)
         sub_db = filter_gene(db, g)
         # Keep up to K longest sub-alleles per 2-field. Single-rep biases EM
         # toward 2-fields with few sub-alleles (their unique sequence draws all

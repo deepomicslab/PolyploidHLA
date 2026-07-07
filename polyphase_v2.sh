@@ -47,6 +47,7 @@ OUT_ROOT=${OUT_ROOT:-${WORK_DIR}/spechla_out}
 ASM_ROOT=${ASM_ROOT:-${WORK_DIR}/asm_v2}
 GENE_BED=${GENE_BED:-${SCRIPTS_DIR}/gene.spechla.bed}
 ASSEMBLE_PY=${ASSEMBLE_PY:-${SCRIPTS_DIR}/hla_polyphase_assemble.py}
+PREPARE_EXTRA_TYPING_RESOURCES_PY=${PREPARE_EXTRA_TYPING_RESOURCES_PY:-${SCRIPTS_DIR}/prepare_extra_typing_resources.py}
 
 PLOIDY=${PLOIDY:-4}
 THREADS=${THREADS:-8}
@@ -162,6 +163,15 @@ DRB345_EVIDENCE_K=${DRB345_EVIDENCE_K:-71}
 DRB345_MIN_LOCUS_UNIQUE_FRAC=${DRB345_MIN_LOCUS_UNIQUE_FRAC:--1.0}
 DRB345_DRB1_UNTRUSTED_MASK=${DRB345_DRB1_UNTRUSTED_MASK:-0.50}
 
+# Optional non-classical/extra loci. These are not part of the validated default
+# six-gene workflow. Set e.g.:
+#   EXTRA_TYPING_GENES="HLA-E HLA-F HLA-G HLA-H MICA MICB"
+# to build temporary augmented resources under WORK_DIR and include them in the
+# same final_calls/copy_calls outputs.
+EXTRA_TYPING_GENES=${EXTRA_TYPING_GENES:-}
+EXTRA_TYPING_RESOURCE_ROOT=${EXTRA_TYPING_RESOURCE_ROOT:-${WORK_DIR}/extra_typing_resources}
+EXTRA_HLA_DIR=${EXTRA_HLA_DIR:-}
+
 # chimerism prior: 0 = donor major (allo-HSCT recipient blood, default).
 # Set to 1 for solid-organ tx etc.
 RECIPIENT_MAJOR=${RECIPIENT_MAJOR:-0}
@@ -182,6 +192,38 @@ fi
 
 mkdir -p "$OUT_ROOT" "$ASM_ROOT"
 
+gene_short_name () {
+    local gene="$1"
+    if [[ "$gene" == HLA-* ]]; then
+        echo "${gene#HLA-}"
+    else
+        echo "$gene"
+    fi
+}
+
+gene_ref_tag_from_short () {
+    local short="$1"
+    case "$short" in
+        MICA|MICB) echo "$short" ;;
+        *) echo "HLA_${short}" ;;
+    esac
+}
+
+if [[ -n "${EXTRA_TYPING_GENES// }" ]]; then
+    read -r -a EXTRA_TYPING_GENE_ARRAY <<< "$EXTRA_TYPING_GENES"
+    echo "[extra-typing] preparing resources for: ${EXTRA_TYPING_GENE_ARRAY[*]}"
+    "$PYBIN" "$PREPARE_EXTRA_TYPING_RESOURCES_PY" \
+        --spechla-root "$SPECHLA" \
+        --work-dir "$EXTRA_TYPING_RESOURCE_ROOT" \
+        --base-gene-bed "$GENE_BED" \
+        --genes "${EXTRA_TYPING_GENE_ARRAY[@]}"
+    HLA_REF="${EXTRA_TYPING_RESOURCE_ROOT}/db/ref/hla.ref.extend.extra.fa"
+    GENE_BED="${EXTRA_TYPING_RESOURCE_ROOT}/gene.extra.spechla.bed"
+    EXTRA_HLA_DIR="${EXTRA_TYPING_RESOURCE_ROOT}/db/HLA"
+    echo "[extra-typing] HLA_REF=$HLA_REF"
+    echo "[extra-typing] GENE_BED=$GENE_BED"
+fi
+
 vcf_ready () {
     local vcf="$1"
     [[ -s "$vcf" && -s "${vcf}.tbi" ]]
@@ -196,6 +238,11 @@ while read -r chrom start end gene rest; do
     n=${SEEN[$gene]:-0}; n=$((n+1)); SEEN[$gene]=$n
     if [[ $n -gt 1 ]]; then TAGS+=("${gene}_${n}"); else TAGS+=("$gene"); fi
 done < "$GENE_BED"
+
+declare -a TYPING_SHORTS
+for gene in "${GENES[@]}"; do
+    TYPING_SHORTS+=("$(gene_short_name "$gene")")
+done
 
 run_one_sample () {
     local SPEC FQ1 FQ2 OUT VCF MERGED_BAM
@@ -237,24 +284,37 @@ run_one_sample () {
     fi
     [[ -f "${DB_BAM}.bai" ]] || samtools index -@ "$SAMTOOLS_THREADS" "$DB_BAM"
 
-    if [[ -f "${OUT}/A.R1.fq.gz" && $SKIP_DONE -eq 1 ]]; then
+    local BINNING_READY=1
+    for hla in "${TYPING_SHORTS[@]}"; do
+        if [[ ! -s "${OUT}/${hla}.R1.fq.gz" || ! -s "${OUT}/${hla}.R2.fq.gz" ]]; then
+            BINNING_READY=0
+            break
+        fi
+    done
+    if [[ $BINNING_READY -eq 1 && $SKIP_DONE -eq 1 ]]; then
         echo "[skip] per-gene binned fastqs exist"
     else
         echo "[step] assign_reads_to_genes.py -> per-gene fastqs"
         "$PYBIN" "${SPECHLA_SCRIPT}/assign_reads_to_genes.py" \
             -1 "$UFQ1" -2 "$UFQ2" \
             -n "${SPECHLA}/bin" -o "$OUT" -d 0.1 \
-            -b "$DB_BAM" -nm 2
+            -b "$DB_BAM" -nm 2 \
+            --genes "$(IFS=,; echo "${TYPING_SHORTS[*]}")"
     fi
 
     # ---- 2. per-gene bwa to SpecHLA per-gene refs ----
-    local HLAS=(A B C DPB1 DQB1 DRB1)
+    local HLAS=("${TYPING_SHORTS[@]}")
     local GROUP="@RG\tID:${SPEC}\tSM:${SPEC}"
     bwa mem -U 10000 -L 10000,10000 -R "$GROUP" \
         "$HLA_REF" "$UFQ1" "$UFQ2" 2>/dev/null \
         | samtools view -H - > "${OUT}/header.sam" || true
     for hla in "${HLAS[@]}"; do
         local PER_BAM="${OUT}/${hla}.bam"
+        local DISPLAY_GENE
+        case "$hla" in
+            MICA|MICB) DISPLAY_GENE="$hla" ;;
+            *) DISPLAY_GENE="HLA-${hla}" ;;
+        esac
         if [[ -f "$PER_BAM" && $SKIP_DONE -eq 1 ]]; then
             echo "[skip] $PER_BAM exists"
             continue
@@ -262,12 +322,21 @@ run_one_sample () {
         local R1="${OUT}/${hla}.R1.fq.gz"
         local R2="${OUT}/${hla}.R2.fq.gz"
         if [[ ! -s "$R1" || ! -s "$R2" ]]; then
-            echo "[warn] no reads for HLA-${hla}; skipping"
+            echo "[warn] no reads for ${DISPLAY_GENE}; skipping"
             : > "${PER_BAM}.empty"
             continue
         fi
-        local PER_REF="${SPECHLA_DB}/HLA/HLA_${hla}/HLA_${hla}.fa"
-        echo "[step] bwa mem HLA-${hla}"
+        local REF_TAG; REF_TAG=$(gene_ref_tag_from_short "$hla")
+        local PER_REF="${SPECHLA_DB}/HLA/${REF_TAG}/${REF_TAG}.fa"
+        if [[ -n "$EXTRA_HLA_DIR" && -s "${EXTRA_HLA_DIR}/${REF_TAG}/${REF_TAG}.fa" ]]; then
+            PER_REF="${EXTRA_HLA_DIR}/${REF_TAG}/${REF_TAG}.fa"
+        fi
+        if [[ ! -s "$PER_REF" ]]; then
+            echo "[warn] missing per-gene reference for ${REF_TAG}; skipping"
+            : > "${PER_BAM}.empty"
+            continue
+        fi
+        echo "[step] bwa mem ${REF_TAG}"
         bwa mem -t "$THREADS" -U 10000 -L 10000,10000 -R "$GROUP" \
             "$PER_REF" "$R1" "$R2" \
             | samtools view -@ "$SAMTOOLS_THREADS" -bS -F 0x800 - \
@@ -633,6 +702,7 @@ for entry in "${SAMPLES_FQ[@]}"; do
     FINAL_COPIES_COMPACT="${ASM_ROOT}/${S}/${S}.copy_calls.compact.tsv"
     "$PYBIN" "${SCRIPTS_DIR}/aggregate_calls.py" \
         --asm-root "$ASM_ROOT" --sample "$S" --out "$FINAL" \
+        --genes "${GENES[@]}" \
         --spechla-root "$OUT_ROOT" \
         --compact-out "$FINAL_COMPACT" \
         --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
@@ -668,6 +738,7 @@ for entry in "${SAMPLES_FQ[@]}"; do
             --spechla-root "$OUT_ROOT" \
             --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
             --sample "$S" \
+            --genes "${GENES[@]}" \
             --manifest "$CLASS2_DQB1_MANIFEST" \
             --compact-out "$FINAL_COMPACT" \
             --drb1-dqb1-ld-map "$CLASS2_DQB1_DRB1_LD_MAP" \

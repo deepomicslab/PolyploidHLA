@@ -25,6 +25,7 @@ without making recipient/donor assignment part of the final call.
 | `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
 | `evaluate_calls.py`         | compares `<SAMPLE>.final_calls.tsv` with `truth_typing.tsv` at 2-field and G group resolution |
 | `exon_typing_from_haps.py`  | exon-level G group fallback/diagnostic for high-mask genes |
+| `prepare_extra_typing_resources.py` | builds temporary augmented references for optional HLA-E/F/G/H and MICA/MICB typing |
 | `build_resource_indexes.sh` | rebuilds HLA resource indexes when files are missing or a custom resource set is used |
 | `gene.spechla.bed`          | per-gene typing region on bundled `hla.ref.extend.fa` |
 | `resources/spechla/`        | bundled SpecHLA-derived helper scripts and HLA reference files |
@@ -178,6 +179,8 @@ Optional environment / database overrides:
 | `WORK_DIR` | parent of this repository | base for output dirs |
 | `OUT_ROOT` | `${WORK_DIR}/spechla_out`  | per-sample alignments + VCFs |
 | `ASM_ROOT` | `${WORK_DIR}/asm_v2`       | typing outputs |
+| `EXTRA_TYPING_GENES` | empty | optional additional loci to type, e.g. `HLA-E HLA-F HLA-G HLA-H MICA MICB` |
+| `EXTRA_TYPING_RESOURCE_ROOT` | `${WORK_DIR}/extra_typing_resources` | temporary augmented references generated when `EXTRA_TYPING_GENES` is set |
 | `EXON_TYPING` | `1` | also write exon-level fallback diagnostics (`<SAMPLE>.exon_calls.tsv`) |
 | `BOWTIE2_MODE` | `very-sensitive` | bowtie2 preset for IMGT competitive mapping; use `sensitive` for faster exploratory runs |
 | `BOWTIE2_K` | `30` | max alignments reported per read pair during IMGT competitive mapping |
@@ -189,6 +192,20 @@ Optional environment / database overrides:
 | `REUSE_BINNING_CLEAN_DOWNSTREAM` | `0` | remove downstream outputs after seeding cache when intentionally recomputing calls |
 
 The options above cover the recommended user-facing settings.
+
+Optional HLA-E/F/G/H and MICA/MICB typing is available but is not enabled in the
+validated default six-gene workflow. To include these loci in the same
+`final_calls.tsv` and `copy_calls.tsv` outputs, run with:
+
+```bash
+EXTRA_TYPING_GENES="HLA-E HLA-F HLA-G HLA-H MICA MICB" \
+bash polyphase_v2.sh
+```
+
+When this option is set, the driver automatically builds an augmented reference,
+gene BED, and per-gene BWA references under `EXTRA_TYPING_RESOURCE_ROOT` from the
+bundled IMGT-style FASTA. These calls should be treated as exploratory until
+validated with truth data for these loci.
 
 Read-bin rescue is currently a validation-only diagnostic, not part of the
 default production pipeline. Run `scripts/diagnostics/run_gendx_input_root_diagnostic.sh`
