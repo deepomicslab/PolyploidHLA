@@ -202,7 +202,10 @@ def fit_4hap(counts, chi_r, top_n=14, min_frac=0.005,
             items_by_name[name] = 0.0
     items = [(c, n) for c, n in items_by_name.items()
              if n / total > min_frac or c in force_names or c in restrict_names]
-    if len(items) < 2: return None, float("inf"), chi_r
+    if len(items) == 1:
+        name = items[0][0]
+        return ((name, name, name, name), 0.0, chi_r)
+    if len(items) < 1: return None, float("inf"), chi_r
     obs_frac = {c: n / total for c, n in items}
     names = [c for c, _ in items]
     if per_gene_chi:
@@ -316,7 +319,10 @@ def fit_4hap_read_likelihood(reads, safe2name, counts, chi_r, top_n=12,
         items_by_name.setdefault(name, counts.get(name, 0.0))
     names = [c for c, n in items_by_name.items()
              if n / total > min_frac or c in force_names or c in restrict_names]
-    if len(names) < 2:
+    if len(names) == 1:
+        only = names[0]
+        return (only, only, only, only), 0.0, chi_r, float("inf")
+    if len(names) < 1:
         return None, float("inf"), chi_r, 0.0
     rows = reads_to_tf_logweights(reads, safe2name, T=T, family_agg=family_agg)
     if not rows:
@@ -553,6 +559,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sample", required=True)
     ap.add_argument("--fq-dir", required=True)
+    ap.add_argument("--fallback-fq1", default=None,
+                    help="fallback R1 FASTQ used when the per-gene read bin has too few mapped reads")
+    ap.add_argument("--fallback-fq2", default=None,
+                    help="fallback R2 FASTQ used when the per-gene read bin has too few mapped reads")
+    ap.add_argument("--fallback-min-reads", type=int, default=10,
+                    help="minimum parsed reads required from a per-gene bin before trying fallback FASTQs")
     ap.add_argument("--chi-r", type=float, required=True)
     ap.add_argument("--gene", action="append", required=True)
     ap.add_argument("--out-dir", required=True)
@@ -662,6 +674,24 @@ def main():
         print(f"  parsed {len(reads)} reads, "
               f"avg multi-map={sum(len(v) for v in reads.values())/max(1,len(reads)):.1f}  "
               f"({time.time()-t0:.1f}s)", flush=True)
+        if (len(reads) < args.fallback_min_reads and args.fallback_fq1 and args.fallback_fq2
+                and os.path.exists(args.fallback_fq1) and os.path.exists(args.fallback_fq2)):
+            print(f"  per-gene bin has {len(reads)} reads; retrying with fallback FASTQs", flush=True)
+            fallback_sam = os.path.join(args.out_dir, f"{g}.fallback.aug.sam")
+            t0 = time.time()
+            bwa_mem_all(ref_fa, args.fallback_fq1, args.fallback_fq2,
+                        args.sample, args.threads, fallback_sam)
+            print(f"  fallback bwa mem -a {time.time()-t0:.1f}s", flush=True)
+            t0 = time.time()
+            fallback_reads = parse_sam_to_reads(fallback_sam, set(contigs), args.min_as_frac)
+            print(f"  fallback parsed {len(fallback_reads)} reads, "
+                  f"avg multi-map={sum(len(v) for v in fallback_reads.values())/max(1,len(fallback_reads)):.1f}  "
+                  f"({time.time()-t0:.1f}s)", flush=True)
+            if len(fallback_reads) > len(reads):
+                reads = fallback_reads
+                os.replace(fallback_sam, sam)
+            else:
+                os.unlink(fallback_sam)
         t0 = time.time()
         theta, counts, iters = run_em(reads, contigs, n_iter=args.em_iter,
                                       T=args.em_T)

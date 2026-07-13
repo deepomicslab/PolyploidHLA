@@ -109,6 +109,8 @@ EM_REFINE_LOW_RECIPIENT_PRIVATE_MAX_FRAC=${EM_REFINE_LOW_RECIPIENT_PRIVATE_MAX_F
 EM_REFINE_LOW_RECIPIENT_PRIVATE_DOSE_RATIO=${EM_REFINE_LOW_RECIPIENT_PRIVATE_DOSE_RATIO:-0.20}
 EM_REFINE_DPB1_RESCUE_CANDIDATES=${EM_REFINE_DPB1_RESCUE_CANDIDATES:-1}
 EM_REFINE_DPB1_RESCUE_MANIFEST=${EM_REFINE_DPB1_RESCUE_MANIFEST:-}
+EM_REFINE_CREATE_MISSING=${EM_REFINE_CREATE_MISSING:-1}
+EM_REFINE_FALLBACK_MIN_READS=${EM_REFINE_FALLBACK_MIN_READS:-10}
 EM_REFINE_PY=${EM_REFINE_PY:-${SCRIPTS_DIR}/iterative_remap_em.py}
 EM_REFINE_GATE_PY=${EM_REFINE_GATE_PY:-${SCRIPTS_DIR}/em_refine_gate.py}
 
@@ -171,6 +173,7 @@ DRB345_DRB1_UNTRUSTED_MASK=${DRB345_DRB1_UNTRUSTED_MASK:-0.50}
 EXTRA_TYPING_GENES=${EXTRA_TYPING_GENES:-}
 EXTRA_TYPING_RESOURCE_ROOT=${EXTRA_TYPING_RESOURCE_ROOT:-${WORK_DIR}/extra_typing_resources}
 EXTRA_HLA_DIR=${EXTRA_HLA_DIR:-}
+EM_REFINE_EXTRA_TYPING_GENES=${EM_REFINE_EXTRA_TYPING_GENES:-1}
 
 # chimerism prior: 0 = donor major (allo-HSCT recipient blood, default).
 # Set to 1 for solid-organ tx etc.
@@ -220,6 +223,15 @@ if [[ -n "${EXTRA_TYPING_GENES// }" ]]; then
     HLA_REF="${EXTRA_TYPING_RESOURCE_ROOT}/db/ref/hla.ref.extend.extra.fa"
     GENE_BED="${EXTRA_TYPING_RESOURCE_ROOT}/gene.extra.spechla.bed"
     EXTRA_HLA_DIR="${EXTRA_TYPING_RESOURCE_ROOT}/db/HLA"
+    if [[ "$EM_REFINE_EXTRA_TYPING_GENES" == "1" ]]; then
+        for extra_gene in "${EXTRA_TYPING_GENE_ARRAY[@]}"; do
+            case " $EM_REFINE_GENES " in
+                *" $extra_gene "*) ;;
+                *) EM_REFINE_GENES+=" $extra_gene" ;;
+            esac
+        done
+        echo "[extra-typing] EM_REFINE_GENES=$EM_REFINE_GENES"
+    fi
     echo "[extra-typing] HLA_REF=$HLA_REF"
     echo "[extra-typing] GENE_BED=$GENE_BED"
 fi
@@ -616,6 +628,9 @@ run_em_refine () {
         --out-dir "$EM_OUT" \
         --baseline-root "${ASM_ROOT}/${SPEC}" \
         --threads "$THREADS" \
+        --fallback-fq1 "${OUT}/${SPEC}.uniq.R1.fq.gz" \
+        --fallback-fq2 "${OUT}/${SPEC}.uniq.R2.fq.gz" \
+        --fallback-min-reads "$EM_REFINE_FALLBACK_MIN_READS" \
         "${CHI_ARGS[@]}" \
         "${RESCUE_ARGS[@]}" \
         ${EM_REFINE_TOP_N:+--top-n "$EM_REFINE_TOP_N"} \
@@ -631,6 +646,13 @@ run_em_refine () {
         local EM_CALLS="${EM_OUT}/${gx}.calls.tsv"
         local TF_COUNTS="${EM_OUT}/${gx}.tf_counts.tsv"
         local DST="${ASM_ROOT}/${SPEC}/${TAG_LC}/${TAG}/calls.tsv"
+        if [[ ! -f "$DST" && "$EM_REFINE_CREATE_MISSING" == "1" && -f "$SUMM" && -f "$EM_CALLS" ]]; then
+            mkdir -p "$(dirname "$DST")"
+            cp "$EM_CALLS" "${DST}.tmp.$$"
+            mv "${DST}.tmp.$$" "$DST"
+            echo "[em-refine] $gx: baseline missing -> CREATE from EM calls"
+            continue
+        fi
         if [[ ! -f "$SUMM" || ! -f "$EM_CALLS" || ! -f "$DST" ]]; then
             echo "[em-refine] $gx: missing inputs (em or baseline); skip"
             continue
