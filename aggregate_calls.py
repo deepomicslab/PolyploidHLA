@@ -414,7 +414,12 @@ def collect(asm_root: Path, sample: str, genes, mask_warn: float, gmap, spechla_
         slot_fractions = [rf[0], rf[1], df[0], df[1]]
         slot_read_fractions = [r_support[0][0], r_support[1][0], d_support[0][0], d_support[1][0]]
         copy_fit = fit_copy_fractions(rs + ds, slot_read_fractions, chi_from_slot_fractions(slot_fractions, sample_chi_r))
-        source = "em-refined" if (d / "calls.baseline.tsv").exists() else "baseline"
+        if (d / "calls.quartet_optimization_input.tsv").exists():
+            source = "quartet-optimized"
+        elif (d / "calls.baseline.tsv").exists():
+            source = "em-refined"
+        else:
+            source = "baseline"
         high_mask = mean_mask is not None and mean_mask >= mask_warn
         report_level = "2-field" if high_mask else "full"
         warning = "high_mask_report_2field" if high_mask else ""

@@ -107,6 +107,11 @@ EM_REFINE_LOW_RECIPIENT_PRIVATE_RESCUE=${EM_REFINE_LOW_RECIPIENT_PRIVATE_RESCUE:
 EM_REFINE_LOW_RECIPIENT_PRIVATE_GENES=${EM_REFINE_LOW_RECIPIENT_PRIVATE_GENES:-HLA-C}
 EM_REFINE_LOW_RECIPIENT_PRIVATE_MAX_FRAC=${EM_REFINE_LOW_RECIPIENT_PRIVATE_MAX_FRAC:-0.02}
 EM_REFINE_LOW_RECIPIENT_PRIVATE_DOSE_RATIO=${EM_REFINE_LOW_RECIPIENT_PRIVATE_DOSE_RATIO:-0.20}
+EM_REFINE_CLASS_I_DISTINCT_RESCUE=${EM_REFINE_CLASS_I_DISTINCT_RESCUE:-0}
+EM_REFINE_CLASS_I_DISTINCT_GENES=${EM_REFINE_CLASS_I_DISTINCT_GENES:-HLA-A,HLA-B,HLA-C}
+EM_REFINE_CLASS_I_DISTINCT_MIN_FRAC=${EM_REFINE_CLASS_I_DISTINCT_MIN_FRAC:-0.005}
+EM_REFINE_CLASS_I_DISTINCT_MIN_COUNT=${EM_REFINE_CLASS_I_DISTINCT_MIN_COUNT:-20}
+EM_REFINE_CLASS_I_DISTINCT_MIN_GAP=${EM_REFINE_CLASS_I_DISTINCT_MIN_GAP:-1.5}
 EM_REFINE_DPB1_RESCUE_CANDIDATES=${EM_REFINE_DPB1_RESCUE_CANDIDATES:-1}
 EM_REFINE_DPB1_RESCUE_MANIFEST=${EM_REFINE_DPB1_RESCUE_MANIFEST:-}
 EM_REFINE_CREATE_MISSING=${EM_REFINE_CREATE_MISSING:-1}
@@ -117,9 +122,43 @@ EM_REFINE_GATE_PY=${EM_REFINE_GATE_PY:-${SCRIPTS_DIR}/em_refine_gate.py}
 # Truth-free post-aggregation rescue generated from the current sample's own calls/EM output.
 # Set CLASS2_RESCUE_PROFILE=off to disable it for ablation/debug runs.
 CLASS2_RESCUE_PROFILE=${CLASS2_RESCUE_PROFILE:-truthfree_readsupport_class2}  # off|dqb1_drb1|combined_class2|truthfree_readsupport_class2
+# The v4 benchmark showed that post-aggregation rewrites reduced DPB1 by 162
+# correct copies and DQB1 by 9/1600. Keep only the non-regressing DRB1 branch by
+# default; explicitly list additional genes to reproduce older profiles.
+CLASS2_RESCUE_GENES=${CLASS2_RESCUE_GENES:-HLA-DRB1}
+CLASS2_DPB1_RARE_COLLAPSE=${CLASS2_DPB1_RARE_COLLAPSE:-1}
 CLASS2_DQB1_DRB1_RESCUE=${CLASS2_DQB1_DRB1_RESCUE:-0}
 CLASS2_DQB1_DRB1_RESCUE_MANIFEST_SUFFIX=${CLASS2_DQB1_DRB1_RESCUE_MANIFEST_SUFFIX:-class2_rescue.manifest.tsv}
 CLASS2_DQB1_DRB1_LD_MAP=${CLASS2_DQB1_DRB1_LD_MAP:-${SCRIPTS_DIR}/resources/drb1_dqb1_ld.tsv}
+
+# Private-read rescue parameters frozen from the v4 development simulation.
+# A/B/C use the v8b EM-gap override plus strict second pass; DRB1 uses only the
+# first-pass four-distinct path.
+PRIVATE_READ_RESCUE=${PRIVATE_READ_RESCUE:-1}
+PRIVATE_READ_RESCUE_GENES=${PRIVATE_READ_RESCUE_GENES:-"HLA-A HLA-B HLA-C HLA-DRB1"}
+PRIVATE_READ_RESCUE_EM_GAP_GENES=${PRIVATE_READ_RESCUE_EM_GAP_GENES:-"HLA-A HLA-B HLA-C"}
+PRIVATE_READ_RESCUE_TOP_N=${PRIVATE_READ_RESCUE_TOP_N:-8}
+PRIVATE_READ_RESCUE_MIN_PAIRS=${PRIVATE_READ_RESCUE_MIN_PAIRS:-30}
+PRIVATE_READ_RESCUE_WEAK_MAX=${PRIVATE_READ_RESCUE_WEAK_MAX:-10}
+PRIVATE_READ_RESCUE_RATIO=${PRIVATE_READ_RESCUE_RATIO:-3}
+PRIVATE_READ_RESCUE_SECOND_PASS_GENES=${PRIVATE_READ_RESCUE_SECOND_PASS_GENES-"HLA-A HLA-B HLA-C"}
+PRIVATE_READ_RESCUE_SECOND_MIN_PAIRS=${PRIVATE_READ_RESCUE_SECOND_MIN_PAIRS:-50}
+PRIVATE_READ_RESCUE_SECOND_WEAK_MAX=${PRIVATE_READ_RESCUE_SECOND_WEAK_MAX:-5}
+PRIVATE_READ_RESCUE_SECOND_RATIO=${PRIVATE_READ_RESCUE_SECOND_RATIO:-5}
+PRIVATE_READ_RESCUE_PY=${PRIVATE_READ_RESCUE_PY:-${SCRIPTS_DIR}/apply_private_read_rescue.py}
+
+# Frozen source-agnostic quartet optimization. Class I requires the normalized
+# direct-read gate; class II uses the joint-v2 EM posterior. Set to shadow to
+# emit decisions without changing calls.tsv, or off for ablation/debug runs.
+QUARTET_OPTIMIZATION_PROFILE=${QUARTET_OPTIMIZATION_PROFILE:-normalized_joint_v1}  # off|shadow|normalized_joint_v1
+QUARTET_OPTIMIZATION_PY=${QUARTET_OPTIMIZATION_PY:-${SCRIPTS_DIR}/apply_quartet_optimization.py}
+QUARTET_OPTIMIZATION_MANIFEST_SUFFIX=${QUARTET_OPTIMIZATION_MANIFEST_SUFFIX:-quartet_optimization.manifest.tsv}
+
+# One row per sample and gene. update_batch_results.py serializes concurrent
+# writers and replaces existing sample/gene rows when a sample is rerun.
+BATCH_RESULTS=${BATCH_RESULTS:-1}
+BATCH_RESULTS_FILE=${BATCH_RESULTS_FILE:-${ASM_ROOT}/polyploidhla_results.tsv}
+BATCH_RESULTS_PY=${BATCH_RESULTS_PY:-${SCRIPTS_DIR}/update_batch_results.py}
 
 EM_REFINE_GATE_HIGH_MASK=${EM_REFINE_GATE_HIGH_MASK:-0.40}
 EM_REFINE_GATE_AMBIG_DIFF=${EM_REFINE_GATE_AMBIG_DIFF:-0.35}
@@ -611,6 +650,13 @@ run_em_refine () {
             --low-recipient-private-max-frac "$EM_REFINE_LOW_RECIPIENT_PRIVATE_MAX_FRAC"
             --low-recipient-private-dose-ratio "$EM_REFINE_LOW_RECIPIENT_PRIVATE_DOSE_RATIO")
     fi
+    if [[ "$EM_REFINE_CLASS_I_DISTINCT_RESCUE" == "1" ]]; then
+        RESCUE_ARGS+=(--class-i-distinct-rescue
+            --class-i-distinct-genes "$EM_REFINE_CLASS_I_DISTINCT_GENES"
+            --class-i-distinct-min-frac "$EM_REFINE_CLASS_I_DISTINCT_MIN_FRAC"
+            --class-i-distinct-min-count "$EM_REFINE_CLASS_I_DISTINCT_MIN_COUNT"
+            --class-i-distinct-min-gap "$EM_REFINE_CLASS_I_DISTINCT_MIN_GAP")
+    fi
     if [[ "$EM_REFINE_DPB1_RESCUE_CANDIDATES" == "1" ]]; then
         RESCUE_ARGS+=(--dpb1-rescue-candidate-mode auto)
         if [[ -n "$EM_REFINE_DPB1_RESCUE_MANIFEST" ]]; then
@@ -754,6 +800,9 @@ for entry in "${SAMPLES_FQ[@]}"; do
                 exit 1
                 ;;
         esac
+        if [[ "$CLASS2_DPB1_RARE_COLLAPSE" == "0" ]]; then
+            CLASS2_RESCUE_ARGS+=(--disable-dpb1-rare-collapse)
+        fi
         "$PYBIN" "${SCRIPTS_DIR}/apply_class2_joint_rescue.py" \
             --in-asm-root "$ASM_ROOT" \
             --in-place \
@@ -761,11 +810,65 @@ for entry in "${SAMPLES_FQ[@]}"; do
             --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt" \
             --sample "$S" \
             --genes "${GENES[@]}" \
+            --rescue-genes $CLASS2_RESCUE_GENES \
             --manifest "$CLASS2_DQB1_MANIFEST" \
             --compact-out "$FINAL_COMPACT" \
             --drb1-dqb1-ld-map "$CLASS2_DQB1_DRB1_LD_MAP" \
             "${CLASS2_RESCUE_ARGS[@]}" \
             && echo "[class2-rescue:${CLASS2_RESCUE_PROFILE}] ${S}: ${CLASS2_DQB1_MANIFEST}"
+    fi
+
+    if [[ "$PRIVATE_READ_RESCUE" == "1" ]]; then
+        PRIVATE_READ_MANIFEST="${ASM_ROOT}/${S}/${S}.private_read_rescue.tsv"
+        "$PYBIN" "$PRIVATE_READ_RESCUE_PY" \
+            --asm-root "$ASM_ROOT" \
+            --spechla-root "$OUT_ROOT" \
+            --sample "$S" \
+            --genes $PRIVATE_READ_RESCUE_GENES \
+            --em-gap-genes $PRIVATE_READ_RESCUE_EM_GAP_GENES \
+            --second-pass-genes $PRIVATE_READ_RESCUE_SECOND_PASS_GENES \
+            --manifest "$PRIVATE_READ_MANIFEST" \
+            --support-cache "${OUT_ROOT}/${S}/private_read_support_cache" \
+            --imgt "$DB_PREFIX" \
+            --top-n "$PRIVATE_READ_RESCUE_TOP_N" \
+            --min-candidate-private "$PRIVATE_READ_RESCUE_MIN_PAIRS" \
+            --weak-singleton-max "$PRIVATE_READ_RESCUE_WEAK_MAX" \
+            --candidate-weak-ratio "$PRIVATE_READ_RESCUE_RATIO" \
+            --second-min-candidate-private "$PRIVATE_READ_RESCUE_SECOND_MIN_PAIRS" \
+            --second-weak-singleton-max "$PRIVATE_READ_RESCUE_SECOND_WEAK_MAX" \
+            --second-candidate-weak-ratio "$PRIVATE_READ_RESCUE_SECOND_RATIO"
+        "$PYBIN" "${SCRIPTS_DIR}/aggregate_calls.py" \
+            --asm-root "$ASM_ROOT" --sample "$S" --out "$FINAL" \
+            --genes "${GENES[@]}" \
+            --spechla-root "$OUT_ROOT" \
+            --compact-out "$FINAL_COMPACT" \
+            --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt"
+        echo "[private-read-rescue] ${S}: ${PRIVATE_READ_MANIFEST}"
+    fi
+
+    if [[ "$QUARTET_OPTIMIZATION_PROFILE" != "off" ]]; then
+        case "$QUARTET_OPTIMIZATION_PROFILE" in
+            shadow|normalized_joint_v1) ;;
+            *)
+                echo "[ERROR] unknown QUARTET_OPTIMIZATION_PROFILE=$QUARTET_OPTIMIZATION_PROFILE (expected off|shadow|normalized_joint_v1)" >&2
+                exit 1
+                ;;
+        esac
+        QUARTET_OPTIMIZATION_MANIFEST="${ASM_ROOT}/${S}/${S}.${QUARTET_OPTIMIZATION_MANIFEST_SUFFIX}"
+        if "$PYBIN" "$QUARTET_OPTIMIZATION_PY" \
+            --asm-root "$ASM_ROOT" \
+            --spechla-root "$OUT_ROOT" \
+            --sample "$S" \
+            --profile "$QUARTET_OPTIMIZATION_PROFILE" \
+            --genes "${GENES[@]}" \
+            --manifest "$QUARTET_OPTIMIZATION_MANIFEST" \
+            --compact-out "$FINAL_COMPACT" \
+            --imgt "$DB_PREFIX" \
+            --g-group "${SPECHLA_DB}/HLA/hla_nom_g.txt"; then
+            echo "[quartet-optimization:${QUARTET_OPTIMIZATION_PROFILE}] ${S}: ${QUARTET_OPTIMIZATION_MANIFEST}"
+        else
+            echo "[quartet-optimization] failed for ${S}; retaining existing calls" >&2
+        fi
     fi
 
     if [[ "$DRB345_TYPING" == "1" ]]; then
@@ -803,6 +906,28 @@ for entry in "${SAMPLES_FQ[@]}"; do
             && echo "[COPY calls] ${S}: ${FINAL_COPIES}" \
             && echo "[COPY compact] ${S}: ${FINAL_COPIES_COMPACT}"
     fi
+
+    if [[ "$BATCH_RESULTS" == "1" && "$COPY_CALLS_OUTPUT" == "1" ]]; then
+        if [[ ! -s "$FINAL_COPIES_COMPACT" ]]; then
+            echo "[ERROR] batch result input missing: ${FINAL_COPIES_COMPACT}" >&2
+            exit 1
+        fi
+        "$PYBIN" "$BATCH_RESULTS_PY" \
+            --sample-result "$FINAL_COPIES_COMPACT" \
+            --batch-result "$BATCH_RESULTS_FILE" \
+            --metadata "experiment=${RESULT_EXPERIMENT:-}" \
+            --metadata "condition=${RESULT_CONDITION:-}" \
+            --metadata "scenario=${RESULT_SCENARIO:-}" \
+            --metadata "graft_fraction=${RESULT_GRAFT_FRACTION:-}" \
+            --metadata "total_coverage=${RESULT_TOTAL_COVERAGE:-}" \
+            --metadata "read_length=${RESULT_READ_LENGTH:-}" \
+            --metadata "insert_mean=${RESULT_INSERT_MEAN:-}" \
+            --metadata "insert_sd=${RESULT_INSERT_SD:-}" \
+            --metadata "error_rate=${RESULT_ERROR_RATE:-}" \
+            --metadata "master_seed=${RESULT_MASTER_SEED:-}"
+    elif [[ "$BATCH_RESULTS" == "1" ]]; then
+        echo "[batch-results] skipped because COPY_CALLS_OUTPUT=0"
+    fi
 done
 
-echo "[INFO] All samples processed."
+echo "[INFO] All samples processed. Batch results: ${BATCH_RESULTS_FILE}"

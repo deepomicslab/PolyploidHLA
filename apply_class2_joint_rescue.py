@@ -1102,7 +1102,11 @@ def propose_dpb1(row, spechla_root: Path, args, dpb1_enrich_owners=None):
     candidate = list(current)
     rules = []
     reasons = []
-    if common and any(allele_number(allele) >= args.dpb1_rare_cutoff for allele in candidate):
+    if (
+        not args.disable_dpb1_rare_collapse
+        and common
+        and any(allele_number(allele) >= args.dpb1_rare_cutoff for allele in candidate)
+    ):
         changed = False
         for index, allele in enumerate(candidate):
             if allele_number(allele) < args.dpb1_rare_cutoff:
@@ -1700,7 +1704,7 @@ def proposals_for_sample(asm_root: Path, spechla_root: Path, sample: str, args, 
     drb1 = by_gene.get("HLA-DRB1")
     effective_drb1 = drb1
     drb1_proposal = None
-    if drb1:
+    if drb1 and "HLA-DRB1" in args.rescue_genes:
         proposal = propose_drb1(drb1, by_gene.get("HLA-DQB1"), args, dqb1_to_drb1, spechla_root, drb1_enrich_owners)
         if proposal:
             proposals.append(proposal)
@@ -1711,7 +1715,7 @@ def proposals_for_sample(asm_root: Path, spechla_root: Path, sample: str, args, 
     dqb1 = by_gene.get("HLA-DQB1")
     effective_dqb1 = dqb1
     dqb1_proposal = None
-    if dqb1:
+    if dqb1 and "HLA-DQB1" in args.rescue_genes:
         proposal = propose_dqb1_high_copy(dqb1, spechla_root, args, dqb1_enrich_owners)
         if proposal:
             proposals.append(proposal)
@@ -1729,7 +1733,7 @@ def proposals_for_sample(asm_root: Path, spechla_root: Path, sample: str, args, 
                     proposals.append(proposal)
                     dqb1_proposal = proposal
                     effective_dqb1 = row_with_quartet(dqb1, proposal["new_2field"])
-    if drb1 and dqb1_proposal and effective_dqb1:
+    if "HLA-DRB1" in args.rescue_genes and drb1 and dqb1_proposal and effective_dqb1:
         proposal = propose_drb1_from_updated_dqb1(effective_drb1, effective_dqb1, args, dqb1_to_drb1, spechla_root)
         if proposal:
             if drb1_proposal:
@@ -1739,7 +1743,7 @@ def proposals_for_sample(asm_root: Path, spechla_root: Path, sample: str, args, 
                 proposal["reason"] = f"{drb1_proposal['reason']};second_pass={proposal['reason']}"
             proposals.append(proposal)
     dpb1 = by_gene.get("HLA-DPB1")
-    if dpb1:
+    if dpb1 and "HLA-DPB1" in args.rescue_genes:
         proposal = propose_dpb1(dpb1, spechla_root, args, dpb1_enrich_owners)
         if proposal:
             proposals.append(proposal)
@@ -1793,6 +1797,12 @@ def main() -> None:
     parser.add_argument("--g-group", required=True, type=Path)
     parser.add_argument("--sample", action="append", default=[])
     parser.add_argument("--genes", nargs="+", default=DEFAULT_GENES)
+    parser.add_argument(
+        "--rescue-genes",
+        nargs="+",
+        default=["HLA-DRB1", "HLA-DQB1", "HLA-DPB1"],
+        help="Class-II genes eligible for post-aggregation rescue proposals.",
+    )
     parser.add_argument("--manifest", type=Path, default=None)
     parser.add_argument("--compact-out", type=Path, default=None,
                         help="Optional compact output path when applying one sample.")
@@ -1847,6 +1857,7 @@ def main() -> None:
                         help="After DQB1 rescue, re-project DRB1 from the updated DQB1 quartet with guarded support checks.")
     parser.add_argument("--drb1-updated-dqb1-max-missing-copies", type=int, default=1)
     parser.add_argument("--dpb1-min-mask", type=float, default=0.40)
+    parser.add_argument("--disable-dpb1-rare-collapse", action="store_true")
     parser.add_argument("--dpb1-rare-cutoff", type=int, default=100)
     parser.add_argument("--dpb1-min-fraction", type=float, default=0.02)
     parser.add_argument("--dpb1-top-common", type=int, default=6)

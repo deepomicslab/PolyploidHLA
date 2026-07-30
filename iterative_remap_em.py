@@ -17,7 +17,7 @@ Usage:
       --gene HLA-A [...] --out-dir O
 """
 import argparse, os, sys, subprocess, tempfile, time, math, itertools
-from collections import defaultdict
+from collections import Counter, defaultdict
 import numpy as np
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -555,6 +555,53 @@ def collapse_low_recipient_private(counts, winners, chi_r, max_frac=0.02,
     return tuple(q), detail, current_residual
 
 
+def rescue_class_i_distinct(counts, winners, chi_r, min_frac=0.005,
+                            min_count=20.0, min_gap=1.5):
+    """Replace one duplicated quartet copy with a strongly supported allele.
+
+    This rescue is restricted to quartets with exactly three distinct alleles.
+    The fourth-ranked distinct EM candidate must have sufficient absolute
+    support and separation from the fifth-ranked candidate. The duplicated
+    slot whose replacement gives the lowest dosage residual is selected.
+    """
+    if not winners or len(winners) != 4 or len(set(winners)) != 3:
+        return winners, None, None
+    total = sum(counts.values()) or 1.0
+    ranked = [
+        (name, count, count / total)
+        for name, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        if not has_expression_suffix(name)
+    ]
+    if len(ranked) < 4:
+        return winners, None, None
+    fourth_count = ranked[3][1]
+    fifth_count = ranked[4][1] if len(ranked) > 4 else 0.0
+    gap = fourth_count / fifth_count if fifth_count > 0 else float("inf")
+    candidate = next((row for row in ranked[:4] if row[0] not in winners), None)
+    if candidate is None:
+        return winners, None, None
+    name, count, frac = candidate
+    if count < min_count or frac < min_frac or gap < min_gap:
+        return winners, None, None
+
+    duplicate = next(name for name, copies in Counter(winners).items() if copies > 1)
+    trials = []
+    for idx, allele in enumerate(winners):
+        if allele != duplicate:
+            continue
+        trial = list(winners)
+        trial[idx] = name
+        residual = quartet_l1_score(counts, trial, chi_r)
+        trials.append((residual, idx, tuple(trial)))
+    residual, replaced_idx, rescued = min(trials)
+    gap_text = "inf" if not math.isfinite(gap) else f"{gap:.2f}"
+    detail = (
+        f"{duplicate}->{name} slot={replaced_idx + 1} weight={count:.1f} "
+        f"frac={frac:.4f} fourth_fifth_gap={gap_text}"
+    )
+    return rescued, detail, residual
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sample", required=True)
@@ -613,6 +660,14 @@ def main():
                     help="comma-separated genes where low recipient-private rescue is enabled")
     ap.add_argument("--low-recipient-private-max-frac", type=float, default=0.02)
     ap.add_argument("--low-recipient-private-dose-ratio", type=float, default=0.20)
+    ap.add_argument("--class-i-distinct-rescue", action="store_true",
+                    help="replace one duplicated class-I quartet copy with a strongly supported top-four EM candidate")
+    ap.add_argument("--class-i-distinct-genes", default="HLA-A,HLA-B,HLA-C",
+                    help="comma-separated genes where class-I distinct rescue is enabled")
+    ap.add_argument("--class-i-distinct-min-frac", type=float, default=0.005)
+    ap.add_argument("--class-i-distinct-min-count", type=float, default=20.0)
+    ap.add_argument("--class-i-distinct-min-gap", type=float, default=1.5,
+                    help="minimum fourth/fifth distinct EM support ratio")
     ap.add_argument("--direct-quartet-likelihood", action="store_true",
                     help="choose the 4-hap quartet by direct read-level likelihood instead of EM-fraction L1")
     ap.add_argument("--direct-top-n", type=int, default=12,
@@ -632,6 +687,7 @@ def main():
                     help="how to aggregate sub-allele alignments into a 2-field read likelihood")
     args = ap.parse_args()
     low_private_genes = {g.strip() for g in args.low_recipient_private_genes.split(",") if g.strip()}
+    class_i_distinct_genes = {g.strip() for g in args.class_i_distinct_genes.split(",") if g.strip()}
     os.makedirs(args.out_dir, exist_ok=True)
     print(f"loading IMGT db: {args.imgt}", flush=True)
     db = load_imgt(args.imgt)
@@ -793,6 +849,17 @@ def main():
             winners = list(collapsed)
             if collapsed_diff is not None:
                 diff = collapsed_diff
+        class_i_distinct_detail = None
+        if args.class_i_distinct_rescue and g in class_i_distinct_genes:
+            rescued, class_i_distinct_detail, rescued_diff = rescue_class_i_distinct(
+                dict(tf_counts), tuple(winners), fit_chi,
+                min_frac=args.class_i_distinct_min_frac,
+                min_count=args.class_i_distinct_min_count,
+                min_gap=args.class_i_distinct_min_gap,
+            )
+            winners = list(rescued)
+            if rescued_diff is not None:
+                diff = rescued_diff
         print(f"  best 4-hap (sumAbsDiff={diff:.3f}, chi_R_fit={fit_chi:.3f}):")
         print(f"    R1={winners[0]}  R2={winners[1]}  "
               f"D1={winners[2]}  D2={winners[3]}", flush=True)
@@ -800,6 +867,8 @@ def main():
             print(f"  recipient-minor rescue: {rescue_detail}", flush=True)
         if low_private_detail:
             print(f"  low-recipient-private rescue: {low_private_detail}", flush=True)
+        if class_i_distinct_detail:
+            print(f"  class-I distinct rescue: {class_i_distinct_detail}", flush=True)
         with open(os.path.join(args.out_dir, f"{g}.iterative.tsv"), "w") as fh:
             fh.write("global_hap\tassignment\tallele_2field\thap_fraction\tallele_read_fraction\tem_weight\n")
             for i, (nm, side) in enumerate(zip(winners, ["R","R","D","D"]), 1):
@@ -820,9 +889,11 @@ def main():
                 fh.write(f"{i}\t{side}\t{rep}\t{hap_fraction:.6f}\t{allele_read_fraction:.6f}\t{allele_read_count:.2f}\t{allele_read_count:.2f}\n")
         # per-gene summary line for downstream gating
         with open(os.path.join(args.out_dir, f"{g}.summary.tsv"), "w") as fh:
-            fh.write("gene\tsum_abs_diff\tn_reads\ttop_frac\tchi_r_fit\n")
+            fh.write("gene\tsum_abs_diff\tn_reads\ttop_frac\tchi_r_fit\tclass_i_distinct_rescue\tclass_i_distinct_detail\n")
             top_frac = max(tf_counts.values()) / total if total else 0.0
-            fh.write(f"{g}\t{diff:.4f}\t{len(reads)}\t{top_frac:.4f}\t{fit_chi:.4f}\n")
+            distinct_applied = int(class_i_distinct_detail is not None)
+            distinct_detail = class_i_distinct_detail or "."
+            fh.write(f"{g}\t{diff:.4f}\t{len(reads)}\t{top_frac:.4f}\t{fit_chi:.4f}\t{distinct_applied}\t{distinct_detail}\n")
         # delete sam to save space
         os.unlink(sam)
         summary.append((g, winners, diff))

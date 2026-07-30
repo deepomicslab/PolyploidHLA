@@ -19,6 +19,7 @@ without making recipient/donor assignment part of the final call.
 | `reassign_gt_chimeric.py`   | χ-aware GT correction before phasing |
 | `estimate_chi_pooled.py`    | pooled-continuous χ_R estimator |
 | `iterative_remap_em.py`     | EM refinement (Salmon-style read remap) |
+| `apply_quartet_optimization.py` | frozen class-I read-gated and class-II joint quartet optimization |
 | `diagnostics/rescue_gene_binned_reads.py` | validation-only read-bin rescue diagnostic/prototype |
 | `apply_class2_joint_rescue.py` | guarded class-II post-aggregate rescue |
 | `em_refine_gate.py`         | per-gene EM override gate logic |
@@ -30,7 +31,10 @@ without making recipient/donor assignment part of the final call.
 | `gene.spechla.bed`          | per-gene typing region on bundled `hla.ref.extend.fa` |
 | `resources/spechla/`        | bundled SpecHLA-derived helper scripts and HLA reference files |
 | `environment.yml`           | conda environment spec |
+| `benchmark/` | simulation, scoring, and Slurm benchmark workflows; see [benchmark/README.md](benchmark/README.md) |
 | `diagnostics/` | offline diagnostics, validation runners, and rejected alternatives kept for reference |
+| `docs/` | experiment protocols and extended project documentation |
+| `tests/` | focused unit and integration tests |
 
 ---
 
@@ -188,6 +192,7 @@ Optional environment / database overrides:
 | `ASSEMBLE_PREFILTER_TOP` | `200` | mappy prefilter size before parasail scoring; smaller is faster |
 | `EM_REFINE_PER_GENE_CHI` | `0` | experimental; fixed pooled/global χ is the recommended default |
 | `EM_REFINE_RECIPIENT_MINOR_RESCUE` | `1` | recover low-frequency recipient-only alleles when donor-major EM fitting collapses R/D to the donor-like pair |
+| `QUARTET_OPTIMIZATION_PROFILE` | `normalized_joint_v1` | `normalized_joint_v1` applies the frozen optimizers; `shadow` audits without rewriting calls; `off` disables the stage |
 | `REUSE_BINNING_ROOT` | empty | seed deduped FASTQs, DB BAM, per-gene FASTQs, and `header.sam` from a prior run |
 | `REUSE_BINNING_CLEAN_DOWNSTREAM` | `0` | remove downstream outputs after seeding cache when intentionally recomputing calls |
 
@@ -254,9 +259,11 @@ asm_v2/<SAMPLE>/
     <SAMPLE>.final_calls.tsv          detailed R/D-slot aggregate result (one row per gene)
     <SAMPLE>.final_calls.compact.tsv  compact R/D-slot allele/proportion/read-count result
     <SAMPLE>.exon_calls.tsv           exon-level G group diagnostic for high-mask genes
+    <SAMPLE>.quartet_optimization.manifest.tsv  baseline/proposal/gate/application audit
     <gene_lc>/<HLA-X>/
         calls.tsv                     per-gene final 4-hap call (R/D-tagged)
         calls.baseline.tsv            baseline before EM refinement (if overridden)
+      calls.quartet_optimization_input.tsv  pre-optimization input (if rewritten)
         hap{1..4}.fa                  per-haplotype masked FASTA
 
 spechla_out/<SAMPLE>/                 intermediate alignments + variants
