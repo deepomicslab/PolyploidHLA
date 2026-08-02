@@ -483,7 +483,12 @@ PYEOF
             && tabix -f -p vcf "$PC_VCF" || echo "[warn] pooled-continuous freebayes failed"
         fi
         if [[ -f "$PC_VCF" ]]; then
-            "$PYBIN" "${SCRIPTS_DIR}/estimate_chi_pooled.py" "$PC_VCF" > "$PC_LOG" 2>&1 || true
+            local PC_CHI_ARGS=()
+            if [[ -n "${CHI_R:-}" ]]; then
+                PC_CHI_ARGS+=(--prior-chi "$CHI_R")
+            fi
+            "$PYBIN" "${SCRIPTS_DIR}/estimate_chi_pooled.py" \
+                "$PC_VCF" "${PC_CHI_ARGS[@]}" > "$PC_LOG" 2>&1 || true
             cat "$PC_LOG"
             local CHI_R_PC
             CHI_R_PC=$(awk '/^GLOBAL[[:space:]]+chi_R=/{for(i=1;i<=NF;i++)if($i~/^chi_R=/){split($i,a,"=");print a[2];exit}}' "$PC_LOG")

@@ -7,9 +7,10 @@ chimeric tetraploid signal, AF clusters at:
   {chi_R, chi_D, 1-chi_D, 1-chi_R}                            (dose 2 = unique to one side)
   ...all symmetric around 0.5.
 
-Strategy: fold AF -> min(AF, 1-AF) to [0, 0.5]. Then look at the LEFT mode
-(<0.25) -> represents the smaller of (chi_R/2, chi_D/2), i.e. chi_R/2 if
-chi_R < 0.5. Mode found via simple histogram peak after dropping noise floor.
+Strategy: fold AF -> min(AF, 1-AF) to [0, 0.5]. Then look at the left mode,
+which represents the smaller of (chi_R/2, chi_D/2). The production model is
+validated for mixture fractions of at least 10%, so peaks below 4% folded AF
+are treated as noise rather than eligible low-component modes.
 """
 import sys, gzip, argparse
 from collections import defaultdict
@@ -41,9 +42,12 @@ def parse_vcf(path):
     return out
 
 
-def estimate_chi_from_af(afs, fold=True):
-    """Pick the smallest mode. Use KDE-like histogram on folded AF."""
-    if not afs: return None
+def estimate_chi_from_af(
+    afs, fold=True, min_chi=0.10, prior_chi=None, prior_max_af_rows=2000,
+):
+    """Estimate the low mixture component from the left folded-AF mode."""
+    if afs is None or len(afs) == 0:
+        return None
     arr = np.asarray(afs)
     if fold:
         arr = np.where(arr > 0.5, 1 - arr, arr)
@@ -53,24 +57,38 @@ def estimate_chi_from_af(afs, fold=True):
     h, edges = np.histogram(arr, bins=bins)
     # smooth (3-bin moving average)
     hs = np.convolve(h, np.ones(3)/3.0, mode='same')
-    # find peaks with min height = max/4 and away from 0
+    minimum_peak = max(0.015, min_chi / 2.0 - 0.01)
     peaks = []
     for i in range(2, len(hs)-1):
         if hs[i] >= hs[i-1] and hs[i] >= hs[i+1] and hs[i] >= max(hs)*0.15:
             center = (edges[i] + edges[i+1]) / 2
-            if center >= 0.015:  # ignore <1.5% noise floor
+            if minimum_peak <= center <= 0.255:
                 peaks.append((center, hs[i]))
     if not peaks:
         return None
-    # smallest-AF peak corresponds to chi_R/2 (recipient low-dose)
     peaks.sort()
     chi_r_over2 = peaks[0][0]
+    selection = "leftmost"
+    if prior_chi is not None and len(arr) < prior_max_af_rows:
+        folded_prior = min(float(prior_chi), 1.0 - float(prior_chi))
+        leftmost_fraction = 2.0 * chi_r_over2
+        chi_r_over2 = min(
+            peaks,
+            key=lambda peak: (
+                abs(2.0 * peak[0] - folded_prior)
+                + 0.5 * (2.0 * peak[0] - leftmost_fraction),
+                peak[0],
+            ),
+        )[0]
+        selection = "prior_guided"
     chi_r = 2 * chi_r_over2
     return {
         "chi_r": chi_r,
         "chi_r_over2_peak": chi_r_over2,
         "n_af": len(arr),
         "all_peaks": peaks[:6],
+        "minimum_peak": minimum_peak,
+        "selection": selection,
     }
 
 
@@ -78,10 +96,20 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("vcf")
     ap.add_argument("--per-gene", action="store_true")
+    ap.add_argument(
+        "--min-chi", type=float, default=0.10,
+        help="minimum supported mixture fraction (default: 0.10)",
+    )
+    ap.add_argument(
+        "--prior-chi", type=float,
+        help="optional GT-based chi used to choose among low-evidence AF peaks",
+    )
     args = ap.parse_args()
     rows = parse_vcf(args.vcf)
     print(f"# {len(rows)} biallelic AF rows after filters", file=sys.stderr)
-    res = estimate_chi_from_af([r[2] for r in rows])
+    res = estimate_chi_from_af(
+        [r[2] for r in rows], min_chi=args.min_chi, prior_chi=args.prior_chi,
+    )
     if res is None:
         print(f"GLOBAL  chi_R=NA  n={len(rows)}  peaks=[]")
         return
@@ -91,7 +119,9 @@ def main():
         for chrom, pos, af, dp in rows:
             per[chrom].append(af)
         for chrom, afs in sorted(per.items()):
-            r = estimate_chi_from_af(afs)
+            r = estimate_chi_from_af(
+                afs, min_chi=args.min_chi, prior_chi=args.prior_chi,
+            )
             if r is None:
                 print(f"  {chrom:14s} n={len(afs):4d}  (no peak)")
             else:
