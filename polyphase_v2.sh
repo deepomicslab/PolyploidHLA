@@ -192,6 +192,12 @@ EXON_TYPING_PY=${EXON_TYPING_PY:-${SCRIPTS_DIR}/exon_typing_from_haps.py}
 COPY_CALLS_OUTPUT=${COPY_CALLS_OUTPUT:-1}
 COPY_CALLS_PY=${COPY_CALLS_PY:-${SCRIPTS_DIR}/copy_calls_from_compact.py}
 
+# Per-gene mixture/copy abundance report. The global mixture estimate remains
+# restricted to the validated six core loci even when extra loci are enabled.
+GENE_ABUNDANCE_OUTPUT=${GENE_ABUNDANCE_OUTPUT:-1}
+GENE_ABUNDANCE_PY=${GENE_ABUNDANCE_PY:-${SCRIPTS_DIR}/report_gene_abundance.py}
+POOLED_CHI_CONTIGS=${POOLED_CHI_CONTIGS:-"HLA_A HLA_B HLA_C HLA_DRB1 HLA_DQB1 HLA_DPB1"}
+
 # DRB3/4/5 linked add-on typing. This updates final_calls.tsv and
 # final_calls.compact.tsv before copy_calls output is generated.
 DRB345_TYPING=${DRB345_TYPING:-1}
@@ -204,12 +210,10 @@ DRB345_EVIDENCE_K=${DRB345_EVIDENCE_K:-71}
 DRB345_MIN_LOCUS_UNIQUE_FRAC=${DRB345_MIN_LOCUS_UNIQUE_FRAC:--1.0}
 DRB345_DRB1_UNTRUSTED_MASK=${DRB345_DRB1_UNTRUSTED_MASK:-0.50}
 
-# Optional non-classical/extra loci. These are not part of the validated default
-# six-gene workflow. Set e.g.:
-#   EXTRA_TYPING_GENES="HLA-E HLA-F HLA-G HLA-H MICA MICB"
-# to build temporary augmented resources under WORK_DIR and include them in the
-# same final_calls/copy_calls outputs.
-EXTRA_TYPING_GENES=${EXTRA_TYPING_GENES:-}
+# Non-classical/extra loci use the same typing and local mixture-QC path, but do
+# not contribute to the initial global chi estimate. Set the variable to an
+# explicit empty string to retain the classical six-gene-only workflow.
+EXTRA_TYPING_GENES=${EXTRA_TYPING_GENES-"HLA-E HLA-F HLA-G HLA-H MICA MICB"}
 EXTRA_TYPING_RESOURCE_ROOT=${EXTRA_TYPING_RESOURCE_ROOT:-${WORK_DIR}/extra_typing_resources}
 EXTRA_HLA_DIR=${EXTRA_HLA_DIR:-}
 EM_REFINE_EXTRA_TYPING_GENES=${EM_REFINE_EXTRA_TYPING_GENES:-1}
@@ -487,16 +491,21 @@ PYEOF
             if [[ -n "${CHI_R:-}" ]]; then
                 PC_CHI_ARGS+=(--prior-chi "$CHI_R")
             fi
+            local CORE_CONTIG_ARRAY=()
+            read -r -a CORE_CONTIG_ARRAY <<< "$POOLED_CHI_CONTIGS"
+            PC_CHI_ARGS+=(--include-contigs "${CORE_CONTIG_ARRAY[@]}")
             "$PYBIN" "${SCRIPTS_DIR}/estimate_chi_pooled.py" \
                 "$PC_VCF" "${PC_CHI_ARGS[@]}" > "$PC_LOG" 2>&1 || true
             cat "$PC_LOG"
-            local CHI_R_PC
+            local CHI_R_PC PC_CHI_STATUS
             CHI_R_PC=$(awk '/^GLOBAL[[:space:]]+chi_R=/{for(i=1;i<=NF;i++)if($i~/^chi_R=/){split($i,a,"=");print a[2];exit}}' "$PC_LOG")
-            if [[ -n "$CHI_R_PC" ]] && awk -v x="$CHI_R_PC" 'BEGIN{exit !(x>0 && x<0.5)}'; then
+            PC_CHI_STATUS=$(awk '/^GLOBAL[[:space:]]+chi_R=/{for(i=1;i<=NF;i++)if($i~/^status=/){split($i,a,"=");print a[2];exit}}' "$PC_LOG")
+            if [[ "$PC_CHI_STATUS" == "PASS" && -n "$CHI_R_PC" ]] \
+                && awk -v x="$CHI_R_PC" 'BEGIN{exit !(x>0 && x<0.5)}'; then
                 echo "[chi] pooled-continuous chi_R=$CHI_R_PC (overrides GT-based $CHI_R)"
                 CHI_R="$CHI_R_PC"
             else
-                echo "[chi] pooled-continuous chi_R unusable ('$CHI_R_PC'); keeping GT-based $CHI_R"
+                echo "[chi] pooled-continuous status=${PC_CHI_STATUS:-UNKNOWN} chi_R='$CHI_R_PC'; keeping GT-based $CHI_R"
             fi
         fi
     fi
@@ -900,6 +909,31 @@ for entry in "${SAMPLES_FQ[@]}"; do
                 && echo "[DRB345] ${S}: ${ASM_ROOT}/${S}/hla-drb345/HLA-DRB345/calls.tsv"
         else
             echo "[DRB345] ${S}: missing DB BAM; skip (${DRB345_DB_BAM})"
+        fi
+    fi
+
+    if [[ "$GENE_ABUNDANCE_OUTPUT" == "1" ]]; then
+        GENE_ABUNDANCE_FILE="${ASM_ROOT}/${S}/${S}.gene_abundance.tsv"
+        POOLED_VCF="${OUT_ROOT}/${S}/${S}.pooled_continuous.vcf.gz"
+        POOLED_LOG="${OUT_ROOT}/${S}/${S}.chi_pooled.txt"
+        CHIMERISM_LOG="${OUT_ROOT}/${S}/${S}.chimerism.txt"
+        DRB345_CALLS="${ASM_ROOT}/${S}/hla-drb345/HLA-DRB345/calls.tsv"
+        DRB345_TF_COUNTS="${OUT_ROOT}/${S}/drb345/HLA-DRB345.tf_counts.tsv"
+        if [[ -s "$POOLED_VCF" && -s "$FINAL_COMPACT" ]]; then
+            "$PYBIN" "$GENE_ABUNDANCE_PY" \
+                --sample "$S" \
+                --pooled-vcf "$POOLED_VCF" \
+                --pooled-log "$POOLED_LOG" \
+                --chimerism-log "$CHIMERISM_LOG" \
+                --gene-bed "$GENE_BED" \
+                --compact-calls "$FINAL_COMPACT" \
+                --drb345-calls "$DRB345_CALLS" \
+                --drb345-tf-counts "$DRB345_TF_COUNTS" \
+                --out "$GENE_ABUNDANCE_FILE" \
+                && echo "[GENE abundance] ${S}: ${GENE_ABUNDANCE_FILE}" \
+                || echo "[warn] gene abundance report failed for ${S}" >&2
+        else
+            echo "[warn] gene abundance report skipped for ${S}: missing pooled VCF or final calls" >&2
         fi
     fi
 

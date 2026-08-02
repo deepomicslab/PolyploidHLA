@@ -17,8 +17,18 @@ from collections import defaultdict
 import numpy as np
 
 
-def parse_vcf(path):
+QC_GENE_MIN_AF = 30
+# Development-derived gates; freeze before independent validation.
+MODEL_MISMATCH_GENE_DELTA = 0.15
+MODEL_MISMATCH_PEAK_RATIO = 0.67
+MODEL_MISMATCH_RESIDUAL_MARGIN = 0.02
+LOW_CONFIDENCE_CI_WIDTH = 0.15
+LOW_CONFIDENCE_BOOTSTRAP_FINITE = 0.90
+
+
+def parse_vcf(path, include_contigs=None):
     """Return list of (chrom, pos, af, dp) from --pooled-continuous output."""
+    include_contigs = set(include_contigs or [])
     op = gzip.open if path.endswith(".gz") else open
     out = []
     with op(path, "rt") as fh:
@@ -26,6 +36,8 @@ def parse_vcf(path):
             if line.startswith("#"): continue
             f = line.rstrip("\n").split("\t")
             chrom, pos, _id, ref, alt, qual, flt, info, fmt = f[:9]
+            if include_contigs and chrom not in include_contigs:
+                continue
             sample = f[9]
             kv = dict(zip(fmt.split(":"), sample.split(":")))
             try:
@@ -44,6 +56,7 @@ def parse_vcf(path):
 
 def estimate_chi_from_af(
     afs, fold=True, min_chi=0.10, prior_chi=None, prior_max_af_rows=2000,
+    dps=None,
 ):
     """Estimate the low mixture component from the left folded-AF mode."""
     if afs is None or len(afs) == 0:
@@ -82,6 +95,28 @@ def estimate_chi_from_af(
         )[0]
         selection = "prior_guided"
     chi_r = 2 * chi_r_over2
+    selected_peak = min(peaks, key=lambda peak: abs(peak[0] - chi_r_over2))
+    alternatives = [peak for peak in peaks if peak != selected_peak]
+    best_alternative_height = max((peak[1] for peak in alternatives), default=None)
+    peak_ratio = (
+        selected_peak[1] / best_alternative_height
+        if best_alternative_height not in (None, 0) else None
+    )
+
+    weights = np.asarray(dps, dtype=float) if dps is not None else np.ones(len(arr))
+
+    def weighted_residual(candidate):
+        grid = np.asarray([
+            candidate / 2.0, candidate, (1.0 - candidate) / 2.0, 0.5,
+        ])
+        distances = np.min(np.abs(arr[:, None] - grid[None, :]), axis=1)
+        return float(np.average(distances, weights=weights))
+
+    residual = weighted_residual(chi_r)
+    alternative_residuals = [weighted_residual(2.0 * peak[0]) for peak in alternatives]
+    residual_margin = (
+        residual - min(alternative_residuals) if alternative_residuals else None
+    )
     return {
         "chi_r": chi_r,
         "chi_r_over2_peak": chi_r_over2,
@@ -89,7 +124,51 @@ def estimate_chi_from_af(
         "all_peaks": peaks[:6],
         "minimum_peak": minimum_peak,
         "selection": selection,
+        "selected_peak_height": float(selected_peak[1]),
+        "peak_ratio": peak_ratio,
+        "weighted_residual": residual,
+        "residual_margin": residual_margin,
     }
+
+
+def bootstrap_chi(afs, dps, min_chi, prior_chi, replicates, seed):
+    """Return a deterministic row-bootstrap interval and empirical peak odds."""
+    if replicates <= 0:
+        return None
+    afs = np.asarray(afs, dtype=float)
+    dps = np.asarray(dps, dtype=float)
+    rng = np.random.default_rng(seed)
+    estimates = []
+    for _ in range(replicates):
+        indices = rng.integers(0, len(afs), size=len(afs))
+        result = estimate_chi_from_af(
+            afs[indices], min_chi=min_chi, prior_chi=prior_chi,
+            dps=dps[indices],
+        )
+        estimates.append(np.nan if result is None else result["chi_r"])
+    values = np.asarray(estimates, dtype=float)
+    finite = values[np.isfinite(values)]
+    if len(finite) == 0:
+        return {
+            "ci_low": None, "ci_high": None, "finite_fraction": 0.0,
+            "peak_support": 0.0, "peak_odds": 0.0,
+        }
+    rounded = np.round(finite / 0.02) * 0.02
+    _, counts = np.unique(rounded, return_counts=True)
+    counts = np.sort(counts)[::-1]
+    best = int(counts[0])
+    second = int(counts[1]) if len(counts) > 1 else 0
+    return {
+        "ci_low": float(np.quantile(finite, 0.025)),
+        "ci_high": float(np.quantile(finite, 0.975)),
+        "finite_fraction": len(finite) / replicates,
+        "peak_support": best / len(finite),
+        "peak_odds": (best + 0.5) / (second + 0.5),
+    }
+
+
+def fmt(value, digits=4):
+    return "NA" if value is None else f"{value:.{digits}f}"
 
 
 def main():
@@ -104,29 +183,110 @@ def main():
         "--prior-chi", type=float,
         help="optional GT-based chi used to choose among low-evidence AF peaks",
     )
+    ap.add_argument(
+        "--bootstrap", type=int, default=200,
+        help="row-bootstrap replicates for the chi interval (default: 200)",
+    )
+    ap.add_argument("--bootstrap-seed", type=int, default=20260802)
+    ap.add_argument(
+        "--include-contigs", nargs="+",
+        help="restrict the global and per-gene estimates to these contigs",
+    )
     args = ap.parse_args()
-    rows = parse_vcf(args.vcf)
+    rows = parse_vcf(args.vcf, args.include_contigs)
     print(f"# {len(rows)} biallelic AF rows after filters", file=sys.stderr)
     res = estimate_chi_from_af(
         [r[2] for r in rows], min_chi=args.min_chi, prior_chi=args.prior_chi,
+        dps=[r[3] for r in rows],
     )
     if res is None:
-        print(f"GLOBAL  chi_R=NA  n={len(rows)}  peaks=[]")
+        print(f"GLOBAL  chi_R=NA  raw_chi_R=NA  status=LOW_CONFIDENCE  "
+              f"reasons=no_eligible_peak  n_af={len(rows)}  peaks=[]")
         return
-    print(f"GLOBAL  chi_R={res['chi_r']:.4f}  n={res['n_af']}  peaks={res['all_peaks']}")
+
+    per = defaultdict(list)
+    for chrom, pos, af, dp in rows:
+        per[chrom].append((af, dp))
+    gene_results = {}
+    for chrom, observations in sorted(per.items()):
+        if len(observations) < QC_GENE_MIN_AF:
+            continue
+        gene_result = estimate_chi_from_af(
+            [item[0] for item in observations], min_chi=args.min_chi,
+            prior_chi=args.prior_chi, dps=[item[1] for item in observations],
+        )
+        if gene_result is not None:
+            gene_results[chrom] = gene_result
+
+    gene_values = np.asarray([result["chi_r"] for result in gene_results.values()])
+    gene_median = float(np.median(gene_values)) if len(gene_values) else None
+    gene_mad = (
+        float(np.median(np.abs(gene_values - gene_median)))
+        if gene_median is not None else None
+    )
+    gene_delta = (
+        abs(res["chi_r"] - gene_median) if gene_median is not None else None
+    )
+    genes_agreeing = int(np.sum(np.abs(gene_values - res["chi_r"]) <= 0.05))
+
+    bootstrap = bootstrap_chi(
+        [r[2] for r in rows], [r[3] for r in rows], args.min_chi,
+        args.prior_chi, args.bootstrap, args.bootstrap_seed,
+    )
+    reasons = []
+    mismatch = []
+    if gene_delta is not None and gene_delta >= MODEL_MISMATCH_GENE_DELTA:
+        mismatch.append("cross_gene_delta")
+    if res["peak_ratio"] is not None and res["peak_ratio"] <= MODEL_MISMATCH_PEAK_RATIO:
+        mismatch.append("weak_selected_peak")
+    if (res["residual_margin"] is not None
+            and res["residual_margin"] >= MODEL_MISMATCH_RESIDUAL_MARGIN):
+        mismatch.append("better_alternative_fit")
+    if mismatch:
+        status = "MODEL_MISMATCH"
+        reasons.extend(mismatch)
+    else:
+        low_confidence = []
+        if bootstrap is None:
+            low_confidence.append("bootstrap_disabled")
+        else:
+            ci_width = bootstrap["ci_high"] - bootstrap["ci_low"]
+            if bootstrap["finite_fraction"] < LOW_CONFIDENCE_BOOTSTRAP_FINITE:
+                low_confidence.append("bootstrap_failures")
+            if ci_width > LOW_CONFIDENCE_CI_WIDTH:
+                low_confidence.append("wide_interval")
+        status = "LOW_CONFIDENCE" if low_confidence else "PASS"
+        reasons.extend(low_confidence)
+
+    reported_chi = res["chi_r"] if status == "PASS" else None
+    dps = np.asarray([r[3] for r in rows], dtype=float)
+    ci_low = bootstrap["ci_low"] if bootstrap else None
+    ci_high = bootstrap["ci_high"] if bootstrap else None
+    print(
+        f"GLOBAL  chi_R={fmt(reported_chi)}  raw_chi_R={fmt(res['chi_r'])}  "
+        f"status={status}  reasons={','.join(reasons) if reasons else 'none'}  "
+        f"ci95={fmt(ci_low)}-{fmt(ci_high)}  "
+        f"bootstrap_peak_odds={fmt(bootstrap['peak_odds'] if bootstrap else None, 2)}  "
+        f"peak_support={fmt(bootstrap['peak_support'] if bootstrap else None, 3)}  "
+        f"peak_ratio={fmt(res['peak_ratio'], 3)}  "
+        f"gene_median={fmt(gene_median)}  gene_mad={fmt(gene_mad)}  "
+        f"gene_delta={fmt(gene_delta)}  genes_valid={len(gene_values)}  "
+        f"genes_agreeing={genes_agreeing}  n_af={res['n_af']}  "
+        f"median_dp={fmt(float(np.median(dps)), 1)}  "
+        f"total_dp={int(np.sum(dps))}  residual={fmt(res['weighted_residual'], 5)}  "
+        f"residual_margin={fmt(res['residual_margin'], 5)}  "
+        f"selection={res['selection']}  peaks={res['all_peaks']}"
+    )
     if args.per_gene:
-        per = defaultdict(list)
-        for chrom, pos, af, dp in rows:
-            per[chrom].append(af)
-        for chrom, afs in sorted(per.items()):
-            r = estimate_chi_from_af(
-                afs, min_chi=args.min_chi, prior_chi=args.prior_chi,
-            )
-            if r is None:
-                print(f"  {chrom:14s} n={len(afs):4d}  (no peak)")
+        for chrom, observations in sorted(per.items()):
+            gene_result = gene_results.get(chrom)
+            if gene_result is None:
+                print(f"  {chrom:14s} n={len(observations):4d}  (no reliable peak)")
             else:
-                print(f"  {chrom:14s} n={len(afs):4d}  chi_R={r['chi_r']:.4f}  "
-                      f"peaks={r['all_peaks'][:3]}")
+                print(f"  {chrom:14s} n={len(observations):4d}  "
+                      f"chi_R={gene_result['chi_r']:.4f}  "
+                      f"residual={gene_result['weighted_residual']:.5f}  "
+                      f"peaks={gene_result['all_peaks'][:3]}")
 
 
 if __name__ == "__main__":

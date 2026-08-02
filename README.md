@@ -18,6 +18,7 @@ without making recipient/donor assignment part of the final call.
 | `hla_polyphase_assemble.py` | baseline typing engine (whatshap polyphase + IMGT scoring) |
 | `reassign_gt_chimeric.py`   | χ-aware GT correction before phasing |
 | `estimate_chi_pooled.py`    | pooled-continuous χ_R estimator |
+| `report_gene_abundance.py`  | writes the 15-gene mixture/copy-abundance and QC report |
 | `iterative_remap_em.py`     | EM refinement (Salmon-style read remap) |
 | `apply_quartet_optimization.py` | frozen class-I read-gated and class-II joint quartet optimization |
 | `diagnostics/rescue_gene_binned_reads.py` | validation-only read-bin rescue diagnostic/prototype |
@@ -26,7 +27,7 @@ without making recipient/donor assignment part of the final call.
 | `aggregate_calls.py`        | merges per-gene `calls.tsv` into one summary table |
 | `evaluate_calls.py`         | compares `<SAMPLE>.final_calls.tsv` with `truth_typing.tsv` at 2-field and G group resolution |
 | `exon_typing_from_haps.py`  | exon-level G group fallback/diagnostic for high-mask genes |
-| `prepare_extra_typing_resources.py` | builds temporary augmented references for optional HLA-E/F/G/H and MICA/MICB typing |
+| `prepare_extra_typing_resources.py` | builds augmented references for HLA-E/F/G/H and MICA/MICB typing |
 | `build_resource_indexes.sh` | rebuilds HLA resource indexes when files are missing or a custom resource set is used |
 | `gene.spechla.bed`          | per-gene typing region on bundled `hla.ref.extend.fa` |
 | `resources/spechla/`        | bundled SpecHLA-derived helper scripts and HLA reference files |
@@ -72,12 +73,19 @@ bash polyphase_v2.sh
 uses the parent directory of `polyphase_v2.sh` and writes `${WORK_DIR}/asm_v2`
 and `${WORK_DIR}/spechla_out`.
 
-**Final result files — six primary genes plus optional DRB345:**
+**Final result files:**
 
 ```bash
 column -t run_outputs/asm_v2/mySample/mySample.copy_calls.tsv
 column -t run_outputs/asm_v2/mySample/mySample.final_calls.tsv
+column -t run_outputs/asm_v2/mySample/mySample.gene_abundance.tsv
 ```
+
+By default, allele-copy outputs contain the six validated classical genes,
+the six extended genes HLA-E/F/G/H, MICA, and MICB, plus the DRB345 linked
+add-on row. The abundance report separates DRB345 into HLA-DRB3, HLA-DRB4,
+and HLA-DRB5, producing 15 gene rows in total. The extended-gene calls and
+abundance rows remain exploratory until independently validated.
 
 Primary side-agnostic copy report:
 
@@ -149,13 +157,23 @@ row. This is not a seventh ordinary locus: it is a DRB1-linked add-on for the
 DRB3/DRB4/DRB5 genes. The add-on extracts read pairs with competitive DB
 support for DRB3/4/5, EM-remaps them to a combined DRB345 allele set, and uses
 the final DRB1 haplotypes to decide whether each R1/R2/D1/D2 haplotype should
-carry DRB3, DRB4, DRB5, or no DRB345 gene. It does not change the six primary
-gene calls. DRB345 DB-read extraction accepts bowtie2-style alignment scores,
+carry DRB3, DRB4, DRB5, or no DRB345 gene. It does not change the classical or
+extended fixed-diploid gene calls. DRB345 DB-read extraction accepts bowtie2-style alignment scores,
 where the best score is often 0 and imperfect hits are negative. If the DRB1
 row is high-mask / low-confidence, the add-on switches to an evidence-first
 mode: long locus-unique k-mers decide which DRB3/4/5 loci have credible support,
 then EM allele fractions are fit to the R/R/D/D dose model without hard DRB1
 linkage. This lets DRB345 remain callable when DRB1 itself is unreliable.
+
+The pipeline also writes `<SAMPLE>.gene_abundance.tsv`. Its fixed-diploid rows
+cover the six classical genes and the six default extended genes (HLA-E/F/G/H,
+MICA, and MICB), with global mixture, gene-local AF estimate, depth, residual,
+and local/global agreement fields. The global mixture remains restricted to the
+validated six classical genes. HLA-DRB3/4/5 are reported as three conditional
+copy-abundance rows: their low/high source copy counts come from the DRB1-linked
+four-haplotype result, and normal structural absence is reported explicitly.
+Non-PASS pooled mixture estimates propagate as low-confidence abundance rows
+rather than being presented as validated gene-level estimates.
 
 The per-gene FASTAs (`hap{1..4}.fa`) and raw `calls.tsv` are still kept under
 `asm_v2/<SAMPLE>/<gene_lc>/<HLA-X>/` for inspection.
@@ -183,8 +201,10 @@ Optional environment / database overrides:
 | `WORK_DIR` | parent of this repository | base for output dirs |
 | `OUT_ROOT` | `${WORK_DIR}/spechla_out`  | per-sample alignments + VCFs |
 | `ASM_ROOT` | `${WORK_DIR}/asm_v2`       | typing outputs |
-| `EXTRA_TYPING_GENES` | empty | optional additional loci to type, e.g. `HLA-E HLA-F HLA-G HLA-H MICA MICB` |
+| `EXTRA_TYPING_GENES` | `HLA-E HLA-F HLA-G HLA-H MICA MICB` | extended fixed-diploid loci; set to an explicit empty string to disable |
 | `EXTRA_TYPING_RESOURCE_ROOT` | `${WORK_DIR}/extra_typing_resources` | temporary augmented references generated when `EXTRA_TYPING_GENES` is set |
+| `GENE_ABUNDANCE_OUTPUT` | `1` | write `<SAMPLE>.gene_abundance.tsv`; set to `0` to disable |
+| `POOLED_CHI_CONTIGS` | core six reference contigs | contigs allowed to contribute to the global pooled mixture estimate |
 | `EXON_TYPING` | `1` | also write exon-level fallback diagnostics (`<SAMPLE>.exon_calls.tsv`) |
 | `BOWTIE2_MODE` | `very-sensitive` | bowtie2 preset for IMGT competitive mapping; use `sensitive` for faster exploratory runs |
 | `BOWTIE2_K` | `30` | max alignments reported per read pair during IMGT competitive mapping |
@@ -198,18 +218,21 @@ Optional environment / database overrides:
 
 The options above cover the recommended user-facing settings.
 
-Optional HLA-E/F/G/H and MICA/MICB typing is available but is not enabled in the
-validated default six-gene workflow. To include these loci in the same
-`final_calls.tsv` and `copy_calls.tsv` outputs, run with:
+HLA-E/F/G/H and MICA/MICB are enabled by default and are included in the same
+`final_calls.tsv` and `copy_calls.tsv` outputs. To run only the validated six
+classical genes, explicitly disable the extended set:
 
 ```bash
-EXTRA_TYPING_GENES="HLA-E HLA-F HLA-G HLA-H MICA MICB" \
+EXTRA_TYPING_GENES="" \
 bash polyphase_v2.sh
 ```
 
-When this option is set, the driver automatically builds an augmented reference,
-gene BED, and per-gene BWA references under `EXTRA_TYPING_RESOURCE_ROOT` from the
-bundled IMGT-style FASTA. These calls should be treated as exploratory until
+When the extended set is enabled, the driver automatically builds an augmented
+reference, gene BED, and per-gene BWA references under
+`EXTRA_TYPING_RESOURCE_ROOT` from the bundled IMGT-style FASTA. The global
+pooled χ estimate remains restricted to the classical six contigs, so enabling
+the extended set cannot change the established global estimator input. Extended
+gene calls and local abundance QC should still be treated as exploratory until
 validated with truth data for these loci.
 
 Read-bin rescue is currently a validation-only diagnostic, not part of the
@@ -235,8 +258,9 @@ bash polyphase_v2.sh
 
 ## 5. Tuning per sample
 
-The pipeline auto-estimates χ from the data. Defaults work for χ_R in
-`[0.05, 0.50]`. For boundary cases:
+The pipeline auto-estimates the lower mixture component from the data. The
+pooled estimator is currently designed for mixture fractions in `[0.10, 0.50]`;
+lower fractions require separate validation. For boundary cases:
 
 | Situation | Override |
 | --------- | -------- |
@@ -258,12 +282,13 @@ asm_v2/<SAMPLE>/
     <SAMPLE>.copy_calls.compact.tsv   compact copy multiset/proportion/read-count result
     <SAMPLE>.final_calls.tsv          detailed R/D-slot aggregate result (one row per gene)
     <SAMPLE>.final_calls.compact.tsv  compact R/D-slot allele/proportion/read-count result
+    <SAMPLE>.gene_abundance.tsv       15-gene mixture/copy-abundance QC report
     <SAMPLE>.exon_calls.tsv           exon-level G group diagnostic for high-mask genes
     <SAMPLE>.quartet_optimization.manifest.tsv  baseline/proposal/gate/application audit
     <gene_lc>/<HLA-X>/
         calls.tsv                     per-gene final 4-hap call (R/D-tagged)
         calls.baseline.tsv            baseline before EM refinement (if overridden)
-      calls.quartet_optimization_input.tsv  pre-optimization input (if rewritten)
+        calls.quartet_optimization_input.tsv  pre-optimization input (if rewritten)
         hap{1..4}.fa                  per-haplotype masked FASTA
 
 spechla_out/<SAMPLE>/                 intermediate alignments + variants
@@ -296,6 +321,23 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
   `sample | gene | allele_multiset | allele_2field_multiset |
   copy_fractions | allele_read_counts | copy_read_counts | proportion_source | copy_identifiability |
   copy_fit_error`.
+* `<SAMPLE>.gene_abundance.tsv` columns:
+  `sample | gene | model | global_chi | global_chi_source |
+  global_qc_status | global_ci95 | local_chi | n_af | median_dp | residual |
+  delta_from_global | low_source_copies | high_source_copies |
+  low_source_fraction | high_source_fraction | expected_gene_abundance |
+  observed_low_fraction | observed_read_fraction | called_copies | status |
+  reasons`.
+  Fixed-diploid rows use `model=fixed_diploid`; HLA-DRB3/4/5 use
+  `model=drb1_linked_conditional_copy`. `expected_gene_abundance` is normalized
+  to the abundance of a diploid gene, so a standard two-copy fixed locus is
+  `1.0`. DRB3/4/5 may be between `0.0` and `1.0` depending on source-specific
+  presence and the mixture fraction.
+* Abundance `status` values are `PASS`, `LOW_CONFIDENCE`, `MODEL_MISMATCH`,
+  `NOT_ENABLED`, and `NOT_RUN`. A normal absent DRB3/4/5 locus is represented
+  by `status=PASS`, `expected_gene_abundance=0`, and
+  `reasons=structural_absence`. If pooled χ fails QC, the GT estimate can keep
+  typing operational, but affected abundance rows remain `LOW_CONFIDENCE`.
 * Per-gene `calls.tsv` columns:
   `global_hap | assignment(R/D) | allele | hap_fraction |
   allele_read_fraction | allele_read_count | em_weight` for EM-refined calls,

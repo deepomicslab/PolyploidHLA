@@ -37,6 +37,20 @@ def read_unlabeled_300x_anchors(log_root: Path) -> dict[float, np.ndarray]:
     return {key: np.asarray(values) for key, values in grouped.items()}
 
 
+def read_current_pass_300x_anchors(path: Path) -> dict[float, np.ndarray]:
+    """Read current-estimator PASS calls from the empirical replay table."""
+    grouped: dict[float, list[float]] = defaultdict(list)
+    with path.open() as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            if int(row["depth"]) != 300 or row["status"] != "PASS":
+                continue
+            mixture = float(row["mixture_fraction"])
+            prediction = row.get("reported_chi_R", "NA")
+            if mixture in MIXTURES and prediction != "NA":
+                grouped[mixture].append(float(prediction))
+    return {key: np.asarray(values) for key, values in grouped.items()}
+
+
 def concordance_correlation(true: np.ndarray, predicted: np.ndarray) -> float:
     covariance = np.cov(true, predicted, ddof=0)[0, 1]
     denominator = true.var() + predicted.var() + (true.mean() - predicted.mean()) ** 2
@@ -44,7 +58,7 @@ def concordance_correlation(true: np.ndarray, predicted: np.ndarray) -> float:
 
 
 def simulate(
-    anchors: dict[float, np.ndarray], replicates: int, seed: int
+    anchors: dict[float, np.ndarray], replicates: int, seed: int, anchor_source: str,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     rng = np.random.default_rng(seed)
     condition_rows = []
@@ -81,8 +95,8 @@ def simulate(
                 "rmse": f"{np.sqrt(np.square(error).mean()):.6f}",
                 "within_0.02": f"{np.mean(np.abs(error) <= 0.02):.6f}",
                 "within_0.05": f"{np.mean(np.abs(error) <= 0.05):.6f}",
-                "anchor_source": "unlabeled_global_chi_300x_residuals",
-                "result_status": "model_based_monte_carlo",
+                "anchor_source": anchor_source,
+                "result_status": "model_based_projection_not_validation",
             })
 
     metric_rows = []
@@ -181,8 +195,13 @@ def plot_results(
     axes[1, 1].legend(frameon=False, fontsize=7)
     for ax in axes.flat:
         ax.grid(axis="y", color="#E8E6E1", linewidth=0.55)
-    fig.suptitle("Mixture-fraction prediction performance", x=0.07, y=0.985, ha="left", fontsize=14, fontweight="bold")
-    fig.subplots_adjust(top=0.91, bottom=0.08, left=0.08, right=0.97, hspace=0.38, wspace=0.30)
+    fig.suptitle("Expected mixture-fraction prediction performance", x=0.07, y=0.985, ha="left", fontsize=14, fontweight="bold")
+    fig.text(
+        0.07, 0.012,
+        "Model-based depth projection from current-estimator 300x PASS residuals; not final validation.",
+        fontsize=7.5, color="#555555",
+    )
+    fig.subplots_adjust(top=0.91, bottom=0.09, left=0.08, right=0.97, hspace=0.38, wspace=0.30)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=400, bbox_inches="tight")
     plt.close(fig)
@@ -194,12 +213,23 @@ def main() -> int:
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--replicates", type=int, default=80)
     parser.add_argument("--seed", type=int, default=20260731)
+    parser.add_argument(
+        "--current-cases", type=Path,
+        help="empirical replay cases TSV; use 300x PASS calls as projection anchors",
+    )
     args = parser.parse_args()
 
-    anchors = read_unlabeled_300x_anchors(args.log_root)
+    if args.current_cases:
+        anchors = read_current_pass_300x_anchors(args.current_cases)
+        anchor_source = "current_estimator_300x_pass_residuals"
+    else:
+        anchors = read_unlabeled_300x_anchors(args.log_root)
+        anchor_source = "legacy_unlabeled_global_chi_300x_residuals"
     if set(anchors) != set(MIXTURES):
         raise RuntimeError(f"missing abundance anchors: {sorted(set(MIXTURES) - set(anchors))}")
-    condition_rows, metric_rows = simulate(anchors, args.replicates, args.seed)
+    condition_rows, metric_rows = simulate(
+        anchors, args.replicates, args.seed, anchor_source,
+    )
     write_tsv(args.output_dir / "abundance_prediction_conditions.tsv", condition_rows)
     write_tsv(args.output_dir / "abundance_prediction_metrics.tsv", metric_rows)
     plot_results(
