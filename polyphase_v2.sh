@@ -198,6 +198,11 @@ GENE_ABUNDANCE_OUTPUT=${GENE_ABUNDANCE_OUTPUT:-1}
 GENE_ABUNDANCE_PY=${GENE_ABUNDANCE_PY:-${SCRIPTS_DIR}/report_gene_abundance.py}
 POOLED_CHI_CONTIGS=${POOLED_CHI_CONTIGS:-"HLA_A HLA_B HLA_C HLA_DRB1 HLA_DQB1 HLA_DPB1"}
 
+# Joint four-haplotype integer-dosage inference. This emits CNV/LOH states and
+# confidence diagnostics without rewriting allele calls.
+CNV_LOH_OUTPUT=${CNV_LOH_OUTPUT:-1}
+CNV_LOH_PY=${CNV_LOH_PY:-${SCRIPTS_DIR}/infer_cnv_loh.py}
+
 # DRB3/4/5 linked add-on typing. This updates final_calls.tsv and
 # final_calls.compact.tsv before copy_calls output is generated.
 DRB345_TYPING=${DRB345_TYPING:-1}
@@ -934,6 +939,25 @@ for entry in "${SAMPLES_FQ[@]}"; do
                 || echo "[warn] gene abundance report failed for ${S}" >&2
         else
             echo "[warn] gene abundance report skipped for ${S}: missing pooled VCF or final calls" >&2
+        fi
+    fi
+
+    if [[ "$CNV_LOH_OUTPUT" == "1" ]]; then
+        GENE_ABUNDANCE_FILE="${ASM_ROOT}/${S}/${S}.gene_abundance.tsv"
+        CNV_LOH_FILE="${ASM_ROOT}/${S}/${S}.cnv_loh.tsv"
+        MERGED_BAM="${OUT_ROOT}/${S}/${S}.merge.bam"
+        if [[ -s "$GENE_ABUNDANCE_FILE" && -s "$FINAL_COMPACT" && -s "$MERGED_BAM" ]]; then
+            "$PYBIN" "$CNV_LOH_PY" \
+                --sample "$S" \
+                --gene-abundance "$GENE_ABUNDANCE_FILE" \
+                --compact-calls "$FINAL_COMPACT" \
+                --merged-bam "$MERGED_BAM" \
+                --gene-bed "$GENE_BED" \
+                --out "$CNV_LOH_FILE" \
+                && echo "[CNV/LOH] ${S}: ${CNV_LOH_FILE}" \
+                || echo "[warn] CNV/LOH inference failed for ${S}" >&2
+        else
+            echo "[warn] CNV/LOH inference skipped for ${S}: missing abundance, calls, or merged BAM" >&2
         fi
     fi
 

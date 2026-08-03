@@ -175,6 +175,16 @@ four-haplotype result, and normal structural absence is reported explicitly.
 Non-PASS pooled mixture estimates propagate as low-confidence abundance rows
 rather than being presented as validated gene-level estimates.
 
+The pipeline then writes `<SAMPLE>.cnv_loh.tsv`. A joint four-haplotype MILP
+fits integer R1/R2/D1/D2 dosages in `0..3` against normalized gene depth and
+allele-group absolute dosage. It reports the exact best state, a no-good-cut
+second optimum, the normal-state counterfactual, and their objective gaps.
+Total-copy changes are labeled `CNV`; a source-local `0/2` state at total copy
+four is labeled `COPY_NEUTRAL_LOH`. The state remains visible when an allele is
+shared across sources, but its confidence is `ASSIGNMENT_AMBIGUOUS` because the
+source carrying that dosage cannot be identified from the mixed sample alone.
+This diagnostic does not rewrite HLA allele calls.
+
 The per-gene FASTAs (`hap{1..4}.fa`) and raw `calls.tsv` are still kept under
 `asm_v2/<SAMPLE>/<gene_lc>/<HLA-X>/` for inspection.
 
@@ -204,6 +214,7 @@ Optional environment / database overrides:
 | `EXTRA_TYPING_GENES` | `HLA-E HLA-F HLA-G HLA-H MICA MICB` | extended fixed-diploid loci; set to an explicit empty string to disable |
 | `EXTRA_TYPING_RESOURCE_ROOT` | `${WORK_DIR}/extra_typing_resources` | temporary augmented references generated when `EXTRA_TYPING_GENES` is set |
 | `GENE_ABUNDANCE_OUTPUT` | `1` | write `<SAMPLE>.gene_abundance.tsv`; set to `0` to disable |
+| `CNV_LOH_OUTPUT` | `1` | write the joint integer-dosage `<SAMPLE>.cnv_loh.tsv` diagnostic; set to `0` to disable |
 | `POOLED_CHI_CONTIGS` | core six reference contigs | contigs allowed to contribute to the global pooled mixture estimate |
 | `EXON_TYPING` | `1` | also write exon-level fallback diagnostics (`<SAMPLE>.exon_calls.tsv`) |
 | `BOWTIE2_MODE` | `very-sensitive` | bowtie2 preset for IMGT competitive mapping; use `sensitive` for faster exploratory runs |
@@ -283,6 +294,7 @@ asm_v2/<SAMPLE>/
     <SAMPLE>.final_calls.tsv          detailed R/D-slot aggregate result (one row per gene)
     <SAMPLE>.final_calls.compact.tsv  compact R/D-slot allele/proportion/read-count result
     <SAMPLE>.gene_abundance.tsv       15-gene mixture/copy-abundance QC report
+    <SAMPLE>.cnv_loh.tsv              joint four-haplotype integer CNV/LOH states
     <SAMPLE>.exon_calls.tsv           exon-level G group diagnostic for high-mask genes
     <SAMPLE>.quartet_optimization.manifest.tsv  baseline/proposal/gate/application audit
     <gene_lc>/<HLA-X>/
@@ -338,6 +350,10 @@ spechla_out/<SAMPLE>/                 intermediate alignments + variants
   by `status=PASS`, `expected_gene_abundance=0`, and
   `reasons=structural_absence`. If pooled χ fails QC, the GT estimate can keep
   typing operational, but affected abundance rows remain `LOW_CONFIDENCE`.
+* `<SAMPLE>.cnv_loh.tsv` includes normalized depth, four integer dosages,
+  total copies, `event`, `confidence`, best/second/normal objectives, and
+  `event_support`. `ASSIGNMENT_AMBIGUOUS` preserves a detected integer state
+  while marking cross-source shared-allele attribution as non-identifiable.
 * Per-gene `calls.tsv` columns:
   `global_hap | assignment(R/D) | allele | hap_fraction |
   allele_read_fraction | allele_read_count | em_weight` for EM-refined calls,
