@@ -175,15 +175,22 @@ four-haplotype result, and normal structural absence is reported explicitly.
 Non-PASS pooled mixture estimates propagate as low-confidence abundance rows
 rather than being presented as validated gene-level estimates.
 
-The pipeline then writes `<SAMPLE>.cnv_loh.tsv`. A joint four-haplotype MILP
-fits integer R1/R2/D1/D2 dosages in `0..3` against normalized gene depth and
-allele-group absolute dosage. It reports the exact best state, a no-good-cut
-second optimum, the normal-state counterfactual, and their objective gaps.
+The pipeline then writes `<SAMPLE>.cnv_loh.tsv` with exactly 15 rows. A joint
+four-haplotype MILP fits integer R1/R2/D1/D2 dosages in `0..3` against normalized
+gene depth and allele-group absolute dosage for the 12 fixed-diploid genes.
+DRB3/4/5 use their DRB1-linked structural state as the normal baseline and fit
+the three-locus EM read composition. DRB slot-level LOH evidence enters the
+objective only when every linked copy has a distinct allele group; repeated
+alleles are fitted at locus-total level because their slot dosage is not
+identifiable. It reports the exact best state, a
+no-good-cut second optimum, the baseline counterfactual, and their objective gaps.
 Total-copy changes are labeled `CNV`; a source-local `0/2` state at total copy
 four is labeled `COPY_NEUTRAL_LOH`. The state remains visible when an allele is
 shared across sources, but its confidence is `ASSIGNMENT_AMBIGUOUS` because the
 source carrying that dosage cannot be identified from the mixed sample alone.
-This diagnostic does not rewrite HLA allele calls.
+This diagnostic only reads `final_calls.compact.tsv`, `gene_abundance.tsv`, BAM,
+and DRB evidence; it does not change or refit the existing four-allele abundance
+predictions and does not rewrite HLA allele calls.
 
 The per-gene FASTAs (`hap{1..4}.fa`) and raw `calls.tsv` are still kept under
 `asm_v2/<SAMPLE>/<gene_lc>/<HLA-X>/` for inspection.

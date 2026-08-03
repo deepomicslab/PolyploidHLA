@@ -16,8 +16,11 @@ from scipy.sparse import lil_matrix
 
 SLOTS = ("R1", "R2", "D1", "D2")
 CORE_GENES = ("HLA-A", "HLA-B", "HLA-C", "HLA-DRB1", "HLA-DQB1", "HLA-DPB1")
+FIXED_GENES = CORE_GENES + ("HLA-E", "HLA-F", "HLA-G", "HLA-H", "MICA", "MICB")
+DRB_GENES = ("HLA-DRB3", "HLA-DRB4", "HLA-DRB5")
 FIELDS = (
-    "sample", "gene", "chi", "raw_median_depth", "normalized_depth", "breadth",
+    "sample", "gene", "model", "chi", "raw_median_depth", "normalized_depth", "breadth",
+    "baseline_R1", "baseline_R2", "baseline_D1", "baseline_D2",
     "R1_dosage", "R2_dosage", "D1_dosage", "D2_dosage", "total_copies",
     "event", "confidence", "best_objective", "second_objective", "objective_gap",
     "normal_objective", "event_support", "allele_groups", "reasons",
@@ -116,6 +119,7 @@ def solve_dosage_milp(
     groups: list[tuple[str, tuple[int, ...], float]],
     prior_weight: float = 0.06,
     r_is_low: bool = True,
+    baseline_state: tuple[int, int, int, int] = (1, 1, 1, 1),
     exclude_bits: tuple[int, ...] | None = None,
     fixed_state: tuple[int, int, int, int] | None = None,
 ) -> MilpResult:
@@ -166,8 +170,8 @@ def solve_dosage_milp(
         matrix[row_index, negative] = -1.0
         objective[positive] = prior_weight
         objective[negative] = prior_weight
-        constraint_lower[row_index] = 1.0
-        constraint_upper[row_index] = 1.0
+        constraint_lower[row_index] = float(baseline_state[slot_index])
+        constraint_upper[row_index] = float(baseline_state[slot_index])
 
     if exclude_bits is not None:
         row_index = rows - 1
@@ -198,40 +202,47 @@ def solve_dosage_milp(
     return MilpResult(_state_from_bits(result.x), float(result.fun))
 
 
-def classify_state(state: tuple[int, int, int, int]) -> str:
-    if state == (1, 1, 1, 1):
+def classify_state(state: tuple[int, int, int, int],
+                   baseline: tuple[int, int, int, int] = (1, 1, 1, 1)) -> str:
+    if state == baseline:
         return "NORMAL"
-    if sum(state) != 4:
+    if sum(state) != sum(baseline):
         return "CNV"
-    if any(sorted(state[offset:offset + 2]) == [0, 2] for offset in (0, 2)):
+    if any(
+        baseline[offset:offset + 2] == (1, 1) and
+        sorted(state[offset:offset + 2]) == [0, 2]
+        for offset in (0, 2)
+    ):
         return "COPY_NEUTRAL_LOH"
     return "COPY_REMODELING"
 
 
-def infer_gene(row: dict[str, str], depth: DepthEvidence, depth_scale: float,
-               chi: float, min_gap: float) -> dict[str, str]:
-    normalized_depth = depth.median / depth_scale
-    groups = allele_groups(row)
+def infer_evidence(
+    row: dict[str, str], normalized_depth: float, groups: list[tuple[str, tuple[int, ...], float]],
+    chi: float, min_gap: float, r_is_low: bool, baseline: tuple[int, int, int, int],
+    model: str, raw_depth: float | None, breadth: float | None, prior_weight: float = 0.06,
+) -> dict[str, str]:
     if not groups:
-        raise ValueError("no usable allele fractions")
-    slot_fractions = [finite_float(row.get(f"{slot}_copy_fraction")) for slot in SLOTS]
-    fraction_total = sum(value for value in slot_fractions if value is not None)
-    r_total = sum(value or 0.0 for value in slot_fractions[:2]) / fraction_total
-    r_is_low = abs(r_total - chi) <= abs(r_total - (1.0 - chi))
-    best = solve_dosage_milp(normalized_depth, chi, groups, r_is_low=r_is_low)
+        groups = [("total", tuple(range(4)), 1.0)]
+    best = solve_dosage_milp(
+        normalized_depth, chi, groups, prior_weight=prior_weight,
+        r_is_low=r_is_low, baseline_state=baseline,
+    )
     best_bits = tuple(bit for dosage in best.state for bit in (dosage & 1, dosage >> 1))
     second = solve_dosage_milp(
-        normalized_depth, chi, groups, r_is_low=r_is_low, exclude_bits=best_bits,
+        normalized_depth, chi, groups, r_is_low=r_is_low,
+        prior_weight=prior_weight, baseline_state=baseline, exclude_bits=best_bits,
     )
     normal = solve_dosage_milp(
-        normalized_depth, chi, groups, r_is_low=r_is_low, fixed_state=(1, 1, 1, 1),
+        normalized_depth, chi, groups, r_is_low=r_is_low,
+        prior_weight=prior_weight, baseline_state=baseline, fixed_state=baseline,
     )
     gap = second.objective - best.objective
     event_support = normal.objective - best.objective
-    event = classify_state(best.state)
+    event = classify_state(best.state, baseline)
     confidence = "HIGH" if gap >= min_gap else "AMBIGUOUS"
     reasons = []
-    if depth.breadth < 0.8:
+    if breadth is not None and breadth < 0.8:
         confidence = "LOW_EVIDENCE"
         reasons.append("low_breadth")
     cross_source_shared = any(
@@ -249,8 +260,11 @@ def infer_gene(row: dict[str, str], depth: DepthEvidence, depth_scale: float,
         reasons.append("no_improvement_over_normal")
     return {
         "sample": row.get("sample", ""), "gene": row.get("gene", ""),
-        "chi": f"{chi:.6f}", "raw_median_depth": f"{depth.median:.3f}",
-        "normalized_depth": f"{normalized_depth:.5f}", "breadth": f"{depth.breadth:.5f}",
+        "model": model, "chi": f"{chi:.6f}",
+        "raw_median_depth": "NA" if raw_depth is None else f"{raw_depth:.3f}",
+        "normalized_depth": f"{normalized_depth:.5f}",
+        "breadth": "NA" if breadth is None else f"{breadth:.5f}",
+        **{f"baseline_{slot}": str(baseline[index]) for index, slot in enumerate(SLOTS)},
         **{f"{slot}_dosage": str(best.state[index]) for index, slot in enumerate(SLOTS)},
         "total_copies": str(sum(best.state)), "event": event, "confidence": confidence,
         "best_objective": f"{best.objective:.6f}",
@@ -258,6 +272,93 @@ def infer_gene(row: dict[str, str], depth: DepthEvidence, depth_scale: float,
         "normal_objective": f"{normal.objective:.6f}", "event_support": f"{event_support:.6f}",
         "allele_groups": str(len(groups)), "reasons": ";".join(reasons),
     }
+
+
+def infer_gene(row: dict[str, str], depth: DepthEvidence, depth_scale: float,
+               chi: float, min_gap: float) -> dict[str, str]:
+    slot_fractions = [finite_float(row.get(f"{slot}_copy_fraction")) for slot in SLOTS]
+    fraction_total = sum(value for value in slot_fractions if value is not None)
+    if fraction_total <= 0:
+        raise ValueError("no usable allele fractions")
+    r_total = sum(value or 0.0 for value in slot_fractions[:2]) / fraction_total
+    return infer_evidence(
+        row, depth.median / depth_scale, allele_groups(row), chi, min_gap,
+        abs(r_total - chi) <= abs(r_total - (1.0 - chi)), (1, 1, 1, 1),
+        "fixed_diploid", depth.median, depth.breadth,
+    )
+
+
+def missing_row(sample: str, gene: str, model: str, chi: float, reason: str,
+                baseline: tuple[int, int, int, int] = (1, 1, 1, 1)) -> dict[str, str]:
+    row = {field: "NA" for field in FIELDS}
+    row.update({
+        "sample": sample, "gene": gene, "model": model, "chi": f"{chi:.6f}",
+        "event": "NOT_TESTED", "confidence": "NOT_AVAILABLE", "reasons": reason,
+        **{f"baseline_{slot}": str(baseline[index]) for index, slot in enumerate(SLOTS)},
+    })
+    return row
+
+
+def drb_rows(sample: str, calls_path: Path | None, tf_counts_path: Path | None,
+             chi: float, min_gap: float) -> list[dict[str, str]]:
+    calls = read_tsv(calls_path) if calls_path is not None and calls_path.exists() else []
+    tf_counts = read_tsv(tf_counts_path) if tf_counts_path is not None and tf_counts_path.exists() else []
+    if not calls or not tf_counts:
+        return [missing_row(sample, gene, "drb1_linked_conditional", chi,
+                            "missing_drb345_evidence", (0, 0, 0, 0)) for gene in DRB_GENES]
+
+    by_hap = {int(row["global_hap"]) - 1: row for row in calls if row.get("global_hap", "").isdigit()}
+    hap_total = sum(finite_float(row.get("hap_fraction")) or 0.0 for row in calls)
+    r_total = sum(finite_float(row.get("hap_fraction")) or 0.0
+                  for row in calls if row.get("assignment") == "R") / hap_total
+    r_is_low = abs(r_total - chi) <= abs(r_total - (1.0 - chi))
+    r_weight, d_weight = (chi, 1.0 - chi) if r_is_low else (1.0 - chi, chi)
+    weights = (r_weight, r_weight, d_weight, d_weight)
+
+    baselines = {}
+    expected_depths = {}
+    for gene in DRB_GENES:
+        locus = gene.replace("HLA-", "")
+        baseline = tuple(
+            int(index in by_hap and by_hap[index].get("drb1_linked_locus") == locus)
+            for index in range(4)
+        )
+        baselines[gene] = baseline
+        expected_depths[gene] = sum(weights[index] * baseline[index] / 2.0 for index in range(4))
+    expected_total = sum(expected_depths.values())
+    observed_counts = {
+        gene: sum(finite_float(row.get("em_weight")) or 0.0 for row in tf_counts
+                  if row.get("locus") == gene.replace("HLA-", ""))
+        for gene in DRB_GENES
+    }
+    observed_total = sum(observed_counts.values())
+
+    rows = []
+    for gene in DRB_GENES:
+        baseline = baselines[gene]
+        if observed_total <= 0 or expected_total <= 0:
+            rows.append(missing_row(sample, gene, "drb1_linked_conditional", chi,
+                                    "no_drb345_normalization", baseline))
+            continue
+        locus = gene.replace("HLA-", "")
+        normalized_depth = observed_counts[gene] / observed_total * expected_total
+        synthetic = {"sample": sample, "gene": gene}
+        for index, slot in enumerate(SLOTS):
+            call = by_hap.get(index, {})
+            if call.get("drb1_linked_locus") == locus:
+                synthetic[f"{slot}_allele"] = call.get("allele", "NA")
+                synthetic[f"{slot}_copy_fraction"] = call.get("allele_read_count", "0")
+            else:
+                synthetic[f"{slot}_allele"] = "NA"
+                synthetic[f"{slot}_copy_fraction"] = "NA"
+        groups = allele_groups(synthetic)
+        if len(groups) != sum(baseline):
+            groups = []
+        rows.append(infer_evidence(
+            synthetic, normalized_depth, groups, chi, min_gap, r_is_low, baseline,
+            "drb1_linked_conditional", observed_counts[gene], None, 0.30,
+        ))
+    return rows
 
 
 def global_chi(abundance_rows: list[dict[str, str]]) -> float:
@@ -283,6 +384,8 @@ def main() -> None:
     parser.add_argument("--compact-calls", required=True, type=Path)
     parser.add_argument("--merged-bam", required=True, type=Path)
     parser.add_argument("--gene-bed", required=True, type=Path)
+    parser.add_argument("--drb345-calls", type=Path)
+    parser.add_argument("--drb345-tf-counts", type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--breadth-min-depth", type=int, default=10)
     parser.add_argument("--min-gap", type=float, default=0.08)
@@ -294,7 +397,7 @@ def main() -> None:
     intervals = read_intervals(args.gene_bed)
     depths = {}
     with pysam.AlignmentFile(args.merged_bam, "rb") as bam:
-        for gene in calls.keys() & intervals.keys():
+        for gene in set(FIXED_GENES) & intervals.keys():
             evidence = bam_depth(bam, *intervals[gene], args.breadth_min_depth)
             if evidence is not None:
                 depths[gene] = evidence
@@ -304,13 +407,21 @@ def main() -> None:
         raise SystemExit("fewer than three covered core genes; cannot normalize HLA depth")
     depth_scale = float(np.median(reference_depths))
     rows = []
-    for gene, row in calls.items():
-        if gene not in depths or gene not in intervals:
+    for gene in FIXED_GENES:
+        row = calls.get(gene)
+        if row is None:
+            rows.append(missing_row(args.sample, gene, "fixed_diploid", chi, "missing_final_call"))
+            continue
+        if gene not in depths:
+            rows.append(missing_row(args.sample, gene, "fixed_diploid", chi, "missing_depth_interval"))
             continue
         try:
             rows.append(infer_gene(row, depths[gene], depth_scale, chi, args.min_gap))
         except ValueError:
-            continue
+            rows.append(missing_row(args.sample, gene, "fixed_diploid", chi, "missing_allele_abundance"))
+    rows.extend(drb_rows(
+        args.sample, args.drb345_calls, args.drb345_tf_counts, chi, args.min_gap,
+    ))
     write_rows(args.out, rows)
     print(f"[CNV/LOH] wrote {args.out} ({len(rows)} genes; depth_scale={depth_scale:.3f})")
 

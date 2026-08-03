@@ -946,6 +946,8 @@ for entry in "${SAMPLES_FQ[@]}"; do
         GENE_ABUNDANCE_FILE="${ASM_ROOT}/${S}/${S}.gene_abundance.tsv"
         CNV_LOH_FILE="${ASM_ROOT}/${S}/${S}.cnv_loh.tsv"
         MERGED_BAM="${OUT_ROOT}/${S}/${S}.merge.bam"
+        DRB345_CALLS="${ASM_ROOT}/${S}/hla-drb345/HLA-DRB345/calls.tsv"
+        DRB345_TF_COUNTS="${OUT_ROOT}/${S}/drb345/HLA-DRB345.tf_counts.tsv"
         if [[ -s "$GENE_ABUNDANCE_FILE" && -s "$FINAL_COMPACT" && -s "$MERGED_BAM" ]]; then
             "$PYBIN" "$CNV_LOH_PY" \
                 --sample "$S" \
@@ -953,6 +955,8 @@ for entry in "${SAMPLES_FQ[@]}"; do
                 --compact-calls "$FINAL_COMPACT" \
                 --merged-bam "$MERGED_BAM" \
                 --gene-bed "$GENE_BED" \
+                --drb345-calls "$DRB345_CALLS" \
+                --drb345-tf-counts "$DRB345_TF_COUNTS" \
                 --out "$CNV_LOH_FILE" \
                 && echo "[CNV/LOH] ${S}: ${CNV_LOH_FILE}" \
                 || echo "[warn] CNV/LOH inference failed for ${S}" >&2
